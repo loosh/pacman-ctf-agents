@@ -2,250 +2,186 @@ from captureAgents import CaptureAgent
 import random, util
 from game import Directions
 import numpy as np
-from util import nearestPoint
-
-
+from util import nearestPoint, manhattanDistance
 
 ##################
 # Game Constants #
 ##################
 
-# Set TRAINING to True while agents are learning, False if in deployment
-# [!] Submit your final team with this set to False!
 TRAINING = True
-
-# Name of weights / any agent parameters that should persist between
-# games. Should be loaded at the start of any game, training or otherwise
-# [!] Replace MY_TEAM with your team name
 WEIGHT_PATH = 'weights_MY_TEAM.json'
 
-# Any other constants used for your training (learning rate, discount, etc.)
-# should be specified here
-# [!] TODO
-
 #################
-# Team creation #
+# Team Creation #
 #################
 
 def createTeam(firstIndex, secondIndex, isRed,
                first='QLearningOffensiveAgent', second='QLearningDefensiveAgent'):
-    """
-    This function should return a list of two agents that will form the
-    team, initialized using firstIndex and secondIndex as their agent
-    index numbers.  isRed is True if the red team is being created, and
-    will be False if the blue team is being created.
-    As a potentially helpful development aid, this function can take
-    additional string-valued keyword arguments ("first" and "second" are
-    such arguments in the case of this function), which will come from
-    the --redOpts and --blueOpts command-line arguments to capture.py.
-    For the nightly contest, however, your team will be created without
-    any extra arguments, so you should make sure that the default
-    behavior is what you want for the nightly contest.
-    """
-
-    # The following line is an example only; feel free to change it.
     return [eval(first)(firstIndex), eval(second)(secondIndex)]
 
 class FoundationAgent(CaptureAgent):
-    
+    def __init__(self, index, epsilon=0.05, alpha=0.2, gamma=0.8):
+        super().__init__(index)
+        self.epsilon = epsilon
+        self.alpha = alpha
+        self.gamma = gamma
+        self.weights = util.Counter()
+        self.lastPositions = []
+        self.repeatedActions = {}
+
     def registerInitialState(self, gameState):
-        CaptureAgent.registerInitialState(self, gameState)
+        super().registerInitialState(gameState)
         self.start = gameState.getAgentPosition(self.index)
+        self.lastPositions = [self.start for _ in range(5)]
 
     def getQValue(self, gameState, action):
         features = self.getFeatures(gameState, action)
-        return features * self.weights
-    
+        return sum(self.weights[f] * features[f] for f in features)
+
     def update(self, gameState, action, nextState, reward):
-        correction = (reward + self.gamma * self.getValue(nextState)) - self.getQValue(gameState, action)
         features = self.getFeatures(gameState, action)
-        for feature in features:
-            self.weights[feature] += self.alpha * correction * features[feature]
-    
+        difference = (reward + self.gamma * self.getValue(nextState)) - self.getQValue(gameState, action)
+        for feature, value in features.items():
+            self.weights[feature] += self.alpha * difference * value
+
     def chooseAction(self, gameState):
         actions = gameState.getLegalActions(self.index)
-        bestAction = None
-        bestValue = -float("inf")
-        
-        for action in actions:
-            nextState = self.getSuccessor(gameState, action)
-            if isinstance(self, QLearningOffensiveAgent):
-                reward = self.getOffensiveReward(gameState, action, nextState)
-            else:  # Assuming QLearningDefensiveAgent
-                reward = self.getDefensiveReward(gameState, action, nextState)
-            self.update(gameState, action, nextState, reward)
-            qValue = self.getQValue(gameState, action)
-            if qValue > bestValue:
-                bestValue = qValue
-                bestAction = action
-
-        return bestAction
+        if util.flipCoin(self.epsilon):
+            return random.choice(actions)
+        values = [self.getQValue(gameState, a) for a in actions]
+        maxValue = max(values)
+        bestActions = [a for a, v in zip(actions, values) if v == maxValue]
+        return random.choice(bestActions)
 
     def getValue(self, gameState):
         actions = gameState.getLegalActions(self.index)
-        if len(actions) == 0:
+        if not actions:
             return 0.0
-        return max(self.getQValue(gameState, action) for action in actions)
+        values = [self.getQValue(gameState, a) for a in actions]
+        return max(values)
 
-    def getSuccessor(self, gameState, action):
-        """
-        Finds the next successor which is a grid position (location tuple).
-        """
-        successor = gameState.generateSuccessor(self.index, action)
-        pos = successor.getAgentState(self.index).getPosition()
-        if pos != nearestPoint(pos):
-            return successor.generateSuccessor(self.index, action)
-        else:
-            return successor
-
-
-class QLearningOffensiveAgent(FoundationAgent):
-    """
-    Offensive Q-Learning agent.
-    """
-    def __init__(self, index, epsilon=0.05, alpha=0.2, gamma=0.8, **kwargs):
-        super().__init__(index, **kwargs)
-        self.epsilon = epsilon
-        self.alpha = alpha
-        self.gamma = gamma
-        self.weights = util.Counter({
-            'successorScore': 100,
-            'distanceToFood': -1,
-            'distanceToGhost': 2,
-            'stop': -100,
-            'reverse': -2,
-            'repeatPositionPenalty': -100,
-        })
-        self.positionsVisited = set()  # Keep track of visited positions
-    
     def getFeatures(self, gameState, action):
         features = util.Counter()
-        successor = self.getSuccessor(gameState, action)
-        features['successorScore'] = self.getScore(successor)
-
-        # Distance to the nearest food
-        foodList = self.getFood(successor).asList()    
-        if len(foodList) > 0:
-            myPos = successor.getAgentState(self.index).getPosition()
-            minDistance = min([self.getMazeDistance(myPos, food) for food in foodList])
-            features['distanceToFood'] = minDistance
-        
-        # Penalize revisiting the same position
-        if successor.getAgentState(self.index).getPosition() in self.positionsVisited:
-            features['repeatPositionPenalty'] = 1
-        else:
-            self.positionsVisited.add(successor.getAgentState(self.index).getPosition())
-
-        # Avoid stopping and reverse movements
-        if action == Directions.STOP: features['stop'] = 1
-        rev = Directions.REVERSE[gameState.getAgentState(self.index).configuration.direction]
-        if action == rev: features['reverse'] = 1
-
-        # Ghost avoidance
-        enemies = [successor.getAgentState(i) for i in self.getOpponents(successor)]
-        ghosts = [a for a in enemies if not a.isPacman and a.getPosition() != None]
-        if len(ghosts) > 0:
-            minGhostDistance = min([self.getMazeDistance(myPos, a.getPosition()) for a in ghosts])
-            features['distanceToGhost'] = minGhostDistance
-        
+        features['bias'] = 1.0
         return features
 
-    def getOffensiveReward(self, gameState, action, nextState):
-        reward = 0
-        if self.getScore(nextState) - self.getScore(gameState) > 0:
-            reward += 100  # Reward for increasing score
-        if action == Directions.STOP:
-            reward -= 10  # Penalty for stopping
-        currentPos = gameState.getAgentState(self.index).getPosition()
-        nextPos = nextState.getAgentState(self.index).getPosition()
-        foodList = self.getFood(gameState).asList()
-        if currentPos in foodList:
-            reward += 5  # Reward for eating food
-        enemies = [nextState.getAgentState(i) for i in self.getOpponents(nextState)]
-        ghosts = [a for a in enemies if not a.isPacman and a.getPosition() != None and self.getMazeDistance(nextPos, a.getPosition()) < 2]
-        if ghosts:  # Check if ghosts are too close
-            reward -= 200  # Big penalty for getting too close to a ghost
-        return reward
+    def getSuccessor(self, gameState, action):
+        return gameState.generateSuccessor(self.index, action)
 
-
-class QLearningDefensiveAgent(FoundationAgent):
-    """
-    Defensive Q-Learning agent.
-    """
-    def __init__(self, index, epsilon=0.05, alpha=0.2, gamma=0.8, **kwargs):
-        super().__init__(index, **kwargs)
-        self.epsilon = epsilon
-        self.alpha = alpha
-        self.gamma = gamma
+class QLearningOffensiveAgent(FoundationAgent):
+    def __init__(self, index, epsilon=0.05, alpha=0.2, gamma=0.8, optimisticSampling=True):
+        super().__init__(index, epsilon, alpha, gamma)
         self.weights = util.Counter({
-            'numInvaders': -1000,
-            'onDefense': 100,
-            'invaderDistance': -10,
-            'distanceToFood': -1,
-            'isScared': -100,
-            'forwardMovement': -5,
+            'distanceToFood': -10,  # Encourage moving towards food
+            'distanceToGhost': 20,  # Discourage getting close to ghosts
+            'stop': -100,
+            'reverse': -20,
+            'numCarrying': 5,
+            'distanceToSafeZone': -1,
+            'distanceFromStart': 20,
+            'stuckPenalty': -400,
+            'exploreBias': 300,
+            'scaredDistanceToEnemy': 10,
+            'returnToFriendlySide': 50,  # Encourage returning to friendly side when carrying pellets
         })
-    
-    def registerInitialState(self, gameState):
-        CaptureAgent.registerInitialState(self, gameState)
-        self.start = gameState.getAgentPosition(self.index)
-        self.foodToDefend = self.getFoodYouAreDefending(gameState).asList()
-
-    def getDefensiveReward(self, gameState, action, nextState):
-        reward = 0
-        myPos = nextState.getAgentState(self.index).getPosition()
-        invaders = [a for a in self.getOpponents(nextState) if nextState.getAgentState(a).isPacman and nextState.getAgentState(a).getPosition() != None]
-        numInvadersNext = len(invaders)
-        numInvadersNow = len([a for a in self.getOpponents(gameState) if gameState.getAgentState(a).isPacman and gameState.getAgentState(a).getPosition() != None])
-        if numInvadersNow > numInvadersNext:
-            reward += 100  # Reward for reducing invaders
-        if action == Directions.STOP:
-            reward -= 10  # Penalty for stopping
-        if myPos == self.start:
-            reward -= 5  # Penalty for being at start position (possibly got eaten)
-        dists = [self.getMazeDistance(myPos, a.getPosition()) for a in invaders]
-        if dists:
-            reward += max(10 - min(dists), 0)  # Reward for being close to invaders (encouraging chase)
-        return reward
+        self.optimisticSampling = optimisticSampling
 
     def getFeatures(self, gameState, action):
-        features = util.Counter()
+        features = super().getFeatures(gameState, action)
         successor = self.getSuccessor(gameState, action)
         myState = successor.getAgentState(self.index)
         myPos = myState.getPosition()
-        
-        features['onDefense'] = 1 if not myState.isPacman else 0
-        invaders = [a for a in self.getOpponents(successor) if successor.getAgentState(a).isPacman and successor.getAgentState(a).getPosition() != None]
-        features['numInvaders'] = len(invaders)
-        
-        if len(invaders) > 0:
-            dists = [self.getMazeDistance(myPos, a.getPosition()) for a in invaders]
-            features['invaderDistance'] = min(dists)
-        else:
-            features['invaderDistance'] = 0
-        
-        # Positioning towards the central defending area
-        boundaryPosition = self.getBoundaryPosition(gameState)
-        features['forwardMovement'] = self.getMazeDistance(myPos, boundaryPosition)
+
+        # Compute distance to the nearest food
+        foodList = self.getFood(successor).asList()
+        if len(foodList) > 0:
+            minDistance = min([self.getMazeDistance(myPos, food) for food in foodList])
+            features['distanceToFood'] = minDistance
+
+        # Compute distance to the nearest ghost
+        enemies = [successor.getAgentState(i) for i in self.getOpponents(successor)]
+        defenders = [a for a in enemies if not a.isPacman and a.getPosition() is not None]
+        if len(defenders) > 0:
+            distances = [self.getMazeDistance(myPos, a.getPosition()) for a in defenders]
+            features['distanceToGhost'] = min(distances)
+
+        features['numCarrying'] = myState.numCarrying
+        if myState.numCarrying > 0:
+            features['distanceToSafeZone'] = self.getMazeDistance(myPos, self.start)
+            # Encourage returning to the friendly side when carrying pellets
+            middleX = gameState.data.layout.width // 2
+            if self.red:
+                if myPos[0] <= middleX:
+                    features['returnToFriendlySide'] = 1
+            else:
+                if myPos[0] >= middleX:
+                    features['returnToFriendlySide'] = 1
+
+        features['distanceFromStart'] = self.getMazeDistance(myPos, self.start)
+
+        if self.lastPositions[-5:].count(myPos) == 5:
+            features['stuckPenalty'] = 1
+
+        if len(self.lastPositions) > 5 and self.lastPositions[-1] == self.lastPositions[-3] and self.lastPositions[-2] == self.lastPositions[-4]:
+            features['exploreBias'] = 1
+
+        if myState.scaredTimer > 0:
+            enemies = [successor.getAgentState(i) for i in self.getOpponents(successor)]
+            enemyPacmen = [a for a in enemies if a.isPacman and a.getPosition() is not None]
+            if enemyPacmen:
+                minDistance = min(self.getMazeDistance(myPos, a.getPosition()) for a in enemyPacmen)
+                features['scaredDistanceToEnemy'] = minDistance
 
         return features
 
-    def getBoundaryPosition(self, gameState):
-        """
-        Calculate a strategic position near the center of your side of the game board.
-        This position is used for defending and intercepting invaders.
-        """
-        mapWidth = gameState.data.layout.width
-        mapHeight = gameState.data.layout.height
-        x = mapWidth // 2 if self.red else mapWidth // 2 - 1
-        
-        # Find the closest non-wall position to the center line
-        for y in range(mapHeight // 2, mapHeight):
-            if not gameState.hasWall(x, y):
-                return (x, y)
-        for y in range(mapHeight // 2, -1, -1):
-            if not gameState.hasWall(x, y):
-                return (x, y)
-        return None
+class QLearningDefensiveAgent(FoundationAgent):
+    def __init__(self, index, epsilon=0.05, alpha=0.2, gamma=0.8, optimisticSampling=True):
+        super().__init__(index, epsilon, alpha, gamma)
+        self.weights = util.Counter({
+            'onDefense': 100,
+            'invadersDistance': -10,
+            'stop': -100,
+            'reverse': -20,
+            'numInvaders': -10,
+            'distanceFromStart': 20,
+            'stuckPenalty': -200,
+            'exploreBias': 200,
+            'scaredDistanceToEnemy': 10,  # Added feature for scared state
+        })
+        self.optimisticSampling = optimisticSampling
 
+    def getFeatures(self, gameState, action):
+        features = super().getFeatures(gameState, action)
+        successor = self.getSuccessor(gameState, action)
+        myState = successor.getAgentState(self.index)
+        myPos = myState.getPosition()
 
+        features['onDefense'] = 1 if not myState.isPacman else 0
+        enemies = [successor.getAgentState(i) for i in self.getOpponents(successor)]
+        invaders = [a for a in enemies if a.isPacman and a.getPosition() is not None]
+        features['numInvaders'] = len(invaders)
+        dists = [self.getMazeDistance(myPos, a.getPosition()) for a in invaders] if invaders else [0]
+        features['invadersDistance'] = min(dists, default=0)
+
+        middleX = gameState.data.layout.width // 2
+        if self.red:
+            features['avoidEnemySide'] = -100 if myPos[0] >= middleX else 1
+        else:
+            features['avoidEnemySide'] = -100 if myPos[0] <= middleX else 1
+
+        features['distanceFromStart'] = self.getMazeDistance(myPos, self.start)
+
+        if self.lastPositions[-5:].count(myPos) == 5:
+            features['stuckPenalty'] = 1
+
+        if len(self.lastPositions) > 5 and self.lastPositions[-1] == self.lastPositions[-3] and self.lastPositions[-2] == self.lastPositions[-4]:
+            features['exploreBias'] = 1
+
+        if myState.scaredTimer > 0:
+            enemies = [successor.getAgentState(i) for i in self.getOpponents(successor)]
+            enemyPacmen = [a for a in enemies if a.isPacman and a.getPosition() is not None]
+            if enemyPacmen:
+                minDistance = min(self.getMazeDistance(myPos, a.getPosition()) for a in enemyPacmen)
+                features['scaredDistanceToEnemy'] = minDistance
+
+        return features
