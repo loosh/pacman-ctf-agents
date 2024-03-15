@@ -4,11 +4,50 @@ from game import Directions
 import numpy as np
 from util import nearestPoint
 
-def createTeam(firstIndex, secondIndex, isRed, first='QLearningOffensiveAgent', second='QLearningDefensiveAgent'):
+
+
+##################
+# Game Constants #
+##################
+
+# Set TRAINING to True while agents are learning, False if in deployment
+# [!] Submit your final team with this set to False!
+TRAINING = True
+
+# Name of weights / any agent parameters that should persist between
+# games. Should be loaded at the start of any game, training or otherwise
+# [!] Replace MY_TEAM with your team name
+WEIGHT_PATH = 'weights_MY_TEAM.json'
+
+# Any other constants used for your training (learning rate, discount, etc.)
+# should be specified here
+# [!] TODO
+
+#################
+# Team creation #
+#################
+
+def createTeam(firstIndex, secondIndex, isRed,
+               first='QLearningOffensiveAgent', second='QLearningDefensiveAgent'):
+    """
+    This function should return a list of two agents that will form the
+    team, initialized using firstIndex and secondIndex as their agent
+    index numbers.  isRed is True if the red team is being created, and
+    will be False if the blue team is being created.
+    As a potentially helpful development aid, this function can take
+    additional string-valued keyword arguments ("first" and "second" are
+    such arguments in the case of this function), which will come from
+    the --redOpts and --blueOpts command-line arguments to capture.py.
+    For the nightly contest, however, your team will be created without
+    any extra arguments, so you should make sure that the default
+    behavior is what you want for the nightly contest.
+    """
+
+    # The following line is an example only; feel free to change it.
     return [eval(first)(firstIndex), eval(second)(secondIndex)]
 
-
 class FoundationAgent(CaptureAgent):
+    
     def registerInitialState(self, gameState):
         CaptureAgent.registerInitialState(self, gameState)
         self.start = gameState.getAgentPosition(self.index)
@@ -155,41 +194,3 @@ class QLearningDefensiveAgent(FoundationAgent):
     # The methods getQValue, update, chooseAction, getValue can be similar to those in QLearningOffensiveAgent,
     # but with adjustments to the getFeatures method to focus on defensive priorities
 
-    def getFeatures(self, gameState, action):
-        features = util.Counter()
-        successor = self.getSuccessor(gameState, action)
-        myState = successor.getAgentState(self.index)
-        myPos = myState.getPosition()
-        
-        features['onDefense'] = 1 if not myState.isPacman else 0
-        invaders = [a for a in self.getOpponents(successor) if successor.getAgentState(a).isPacman and successor.getAgentState(a).getPosition() != None]
-        features['numInvaders'] = len(invaders)
-        
-        if len(invaders) > 0:
-            dists = [self.getMazeDistance(myPos, a.getPosition()) for a in invaders]
-            features['invaderDistance'] = min(dists)
-        else:
-            features['invaderDistance'] = 0
-        
-        # Positioning towards the central defending area
-        boundaryPosition = self.getBoundaryPosition(gameState)
-        features['forwardMovement'] = self.getMazeDistance(myPos, boundaryPosition)
-
-        return features
-
-    def getDefensiveReward(self, gameState, action, nextState):
-        reward = 0
-        myPos = nextState.getAgentState(self.index).getPosition()
-        invaders = [a for a in self.getOpponents(nextState) if nextState.getAgentState(a).isPacman and nextState.getAgentState(a).getPosition() != None]
-        numInvadersNext = len(invaders)
-        numInvadersNow = len([a for a in self.getOpponents(gameState) if gameState.getAgentState(a).isPacman and gameState.getAgentState(a).getPosition() != None])
-        if numInvadersNow > numInvadersNext:
-            reward += 100  # Reward for reducing invaders
-        if action == Directions.STOP:
-            reward -= 10  # Penalty for stopping
-        if myPos == self.start:
-            reward -= 5  # Penalty for being at start position (possibly got eaten)
-        dists = [self.getMazeDistance(myPos, a.getPosition()) for a in invaders]
-        if dists:
-            reward += max(10 - min(dists), 0)  # Reward for being close to invaders (encouraging chase)
-        return reward
