@@ -191,6 +191,61 @@ class QLearningDefensiveAgent(FoundationAgent):
         self.start = gameState.getAgentPosition(self.index)
         self.foodToDefend = self.getFoodYouAreDefending(gameState).asList()
 
-    # The methods getQValue, update, chooseAction, getValue can be similar to those in QLearningOffensiveAgent,
-    # but with adjustments to the getFeatures method to focus on defensive priorities
+    def getDefensiveReward(self, gameState, action, nextState):
+        reward = 0
+        myPos = nextState.getAgentState(self.index).getPosition()
+        invaders = [a for a in self.getOpponents(nextState) if nextState.getAgentState(a).isPacman and nextState.getAgentState(a).getPosition() != None]
+        numInvadersNext = len(invaders)
+        numInvadersNow = len([a for a in self.getOpponents(gameState) if gameState.getAgentState(a).isPacman and gameState.getAgentState(a).getPosition() != None])
+        if numInvadersNow > numInvadersNext:
+            reward += 100  # Reward for reducing invaders
+        if action == Directions.STOP:
+            reward -= 10  # Penalty for stopping
+        if myPos == self.start:
+            reward -= 5  # Penalty for being at start position (possibly got eaten)
+        dists = [self.getMazeDistance(myPos, a.getPosition()) for a in invaders]
+        if dists:
+            reward += max(10 - min(dists), 0)  # Reward for being close to invaders (encouraging chase)
+        return reward
+
+    def getFeatures(self, gameState, action):
+        features = util.Counter()
+        successor = self.getSuccessor(gameState, action)
+        myState = successor.getAgentState(self.index)
+        myPos = myState.getPosition()
+        
+        features['onDefense'] = 1 if not myState.isPacman else 0
+        invaders = [a for a in self.getOpponents(successor) if successor.getAgentState(a).isPacman and successor.getAgentState(a).getPosition() != None]
+        features['numInvaders'] = len(invaders)
+        
+        if len(invaders) > 0:
+            dists = [self.getMazeDistance(myPos, a.getPosition()) for a in invaders]
+            features['invaderDistance'] = min(dists)
+        else:
+            features['invaderDistance'] = 0
+        
+        # Positioning towards the central defending area
+        boundaryPosition = self.getBoundaryPosition(gameState)
+        features['forwardMovement'] = self.getMazeDistance(myPos, boundaryPosition)
+
+        return features
+
+    def getBoundaryPosition(self, gameState):
+        """
+        Calculate a strategic position near the center of your side of the game board.
+        This position is used for defending and intercepting invaders.
+        """
+        mapWidth = gameState.data.layout.width
+        mapHeight = gameState.data.layout.height
+        x = mapWidth // 2 if self.red else mapWidth // 2 - 1
+        
+        # Find the closest non-wall position to the center line
+        for y in range(mapHeight // 2, mapHeight):
+            if not gameState.hasWall(x, y):
+                return (x, y)
+        for y in range(mapHeight // 2, -1, -1):
+            if not gameState.hasWall(x, y):
+                return (x, y)
+        return None
+
 
