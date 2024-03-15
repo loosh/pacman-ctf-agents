@@ -14,6 +14,7 @@
 
 from captureAgents import CaptureAgent
 import random, time, util
+from util import nearestPoint
 from game import Directions
 import game
 
@@ -39,7 +40,7 @@ WEIGHT_PATH = 'weights_MY_TEAM.json'
 #################
 
 def createTeam(firstIndex, secondIndex, isRed,
-               first = 'DummyAgent', second = 'DummyAgent'):
+               first='ImprovedOffensiveAgent', second='DynamicDefensiveAgent'):
   """
   This function should return a list of two agents that will form the
   team, initialized using firstIndex and secondIndex as their agent
@@ -103,25 +104,6 @@ class DummyAgent(CaptureAgent):
     '''
 
     return random.choice(actions)
-
-# Import necessary modules
-from captureAgents import CaptureAgent
-import random, time, util
-from game import Directions
-import game
-from util import nearestPoint
-
-#################
-# Team creation #
-#################
-
-def createTeam(firstIndex, secondIndex, isRed,
-               first='ImprovedOffensiveAgent', second='DynamicDefensiveAgent'):
-    """
-    This function should return a list of two agents that will form the team.
-    The first agent will be offensive, focusing on chasing pellets, while the second will be defensive.
-    """
-    return [eval(first)(firstIndex), eval(second)(secondIndex)]
 
 class OffensiveChaseAgent(CaptureAgent):
     """
