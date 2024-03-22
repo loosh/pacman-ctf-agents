@@ -16,6 +16,7 @@ from captureAgents import CaptureAgent
 import random, time, util
 from game import Directions
 import game
+from util import nearestPoint
 
 ##################
 # Game Constants #
@@ -108,33 +109,71 @@ class DummyAgent(CaptureAgent):
 
 class PelletChaserAgent(CaptureAgent):
     def registerInitialState(self, gameState):
+        self.start = gameState.getAgentPosition(self.index)
         CaptureAgent.registerInitialState(self, gameState)
-        self.startPosition = gameState.getAgentPosition(self.index)
+
+    def getFeatures(self, gameState, action):
+        """
+        Returns a counter of features for the state
+        """
+        features = util.Counter()
+        successor = self.getSuccessor(gameState, action)
+        features['successorScore'] = self.getScore(successor)
+
+        return features
+
+    def getSuccessor(self, gameState, action):
+        """
+        Finds the next successor which is a grid position (location tuple).
+        """
+        successor = gameState.generateSuccessor(self.index, action)
+        pos = successor.getAgentState(self.index).getPosition()
+        if pos != nearestPoint(pos):
+            # Only half a grid position was covered
+            return successor.generateSuccessor(self.index, action)
+        else:
+            return successor
+
+    def evaluate(self, gameState, action):
+        """
+        Computes a linear combination of features and feature weights
+        """
+        features = self.getFeatures(gameState, action)
+        weights = self.getWeights(gameState, action)
+        return features * weights
 
     def chooseAction(self, gameState):
+        """
+        Picks among the actions with the highest Q(s,a).
+        """
         actions = gameState.getLegalActions(self.index)
 
-        # Get the current position of the agent
-        currentPosition = gameState.getAgentPosition(self.index)
+        # You can profile your evaluation time by uncommenting these lines
+        # start = time.time()
+        values = [self.evaluate(gameState, a) for a in actions]
+        # print('eval time for agent %d: %.4f' % (self.index, time.time() - start))
 
-        # Get the positions of the pellets
-        pelletPositions = self.getFood(gameState).asList()
+        maxValue = max(values)
+        bestActions = [a for a, v in zip(actions, values) if v == maxValue]
 
-        # If there are pellets available, find the nearest one
-        if pelletPositions:
-            nearestPellet = min(pelletPositions, key=lambda x: self.getMazeDistance(currentPosition, x))
+        foodLeft = len(self.getFood(gameState).asList())
 
-            # Find the action that moves the agent closest to the nearest pellet
-            bestAction = None
-            bestDistance = float('inf')
+        if foodLeft <= 2:
+            bestDist = 9999
             for action in actions:
-                successorPosition = gameState.generateSuccessor(self.index, action).getAgentPosition(self.index)
-                distance = self.getMazeDistance(successorPosition, nearestPellet)
-                if distance < bestDistance:
+                successor = self.getSuccessor(gameState, action)
+                pos2 = successor.getAgentPosition(self.index)
+                dist = self.getMazeDistance(self.start, pos2)
+                if dist < bestDist:
                     bestAction = action
-                    bestDistance = distance
-
+                    bestDist = dist
             return bestAction
 
-        # If there are no pellets available, return a random action
-        return random.choice(actions)
+        return random.choice(bestActions)
+
+    def getWeights(self, gameState, action):
+        """
+        Normally, weights do not depend on the gamestate.  They can be either
+        a counter or a dictionary.
+        """
+        return {'successorScore': 1.0}
