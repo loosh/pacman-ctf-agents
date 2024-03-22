@@ -62,55 +62,40 @@ def createTeam(firstIndex, secondIndex, isRed,
 # Agents #
 ##########
 
-class DummyAgent(CaptureAgent):
- """
- A Dummy agent to serve as an example of the necessary agent structure.
- You should look at baselineTeam.py for more details about how to
- create an agent as this is the bare minimum.
- """
-
- def registerInitialState(self, gameState):
-   """
-   This method handles the initial setup of the
-   agent to populate useful fields (such as what team
-   we're on).
-   A distanceCalculator instance caches the maze distances
-   between each pair of positions, so your agents can use:
-   self.distancer.getDistance(p1, p2)
-   IMPORTANT: This method may run for at most 15 seconds.
-   """
-
-   '''
-   Make sure you do not delete the following line. If you would like to
-   use Manhattan distances instead of maze distances in order to save
-   on initialization time, please take a look at
-   CaptureAgent.registerInitialState in captureAgents.py.
-   '''
-   CaptureAgent.registerInitialState(self, gameState)
-
-   '''
-   Your initialization code goes here, if you need any.
-   '''
-
-
- def chooseAction(self, gameState):
-   """
-   Picks among actions randomly.
-   """
-   actions = gameState.getLegalActions(self.index)
-
-   '''
-   You should change this in your own agent.
-   '''
-
-   return random.choice(actions)
-
-
-
-class PelletChaserAgent(CaptureAgent):
+class QLearningAgent(CaptureAgent):
     def registerInitialState(self, gameState):
         self.start = gameState.getAgentPosition(self.index)
         CaptureAgent.registerInitialState(self, gameState)
+
+    def chooseAction(self, gameState):
+        """
+        Picks among the actions with the highest Q(s,a).
+        """
+        actions = gameState.getLegalActions(self.index)
+
+        # You can profile your evaluation time by uncommenting these lines
+        # start = time.time()
+        values = [self.evaluate(gameState, a) for a in actions]
+
+        print("Values:", values)
+
+        # print('eval time for agent %d: %.4f' % (self.index, time.time() - start))
+        foodLeft = len(self.getFood(gameState).asList())
+        maxValue = max(values)
+        bestActions = [a for a, v in zip(actions, values) if v == maxValue]
+        
+        if foodLeft <= 2:
+            bestDist = 9999
+            for action in actions:
+                successor = self.getSuccessor(gameState, action)
+                pos2 = successor.getAgentPosition(self.index)
+                dist = self.getMazeDistance(self.start, pos2)
+                if dist < bestDist:
+                    bestAction = action
+                    bestDist = dist
+            return bestAction
+
+        return random.choice(bestActions)
 
     def getFeatures(self, gameState, action):
         """
@@ -142,38 +127,49 @@ class PelletChaserAgent(CaptureAgent):
         weights = self.getWeights(gameState, action)
         return features * weights
 
-    def chooseAction(self, gameState):
+    def getWeights(self, gameState, action):
         """
-        Picks among the actions with the highest Q(s,a).
+        Normally, weights do not depend on the gamestate.  They can be either
+        a counter or a dictionary.
         """
-        actions = gameState.getLegalActions(self.index)
+        return {'minDistanceToFood': 1.0}
+    
+class PelletChaserAgent(QLearningAgent):
+    
+    def getFeatures(self, gameState, action):
+        """
+        Returns a counter of features for the state
+        """
+        features = util.Counter()
+        successor = self.getSuccessor(gameState, action)
 
-        # You can profile your evaluation time by uncommenting these lines
-        # start = time.time()
-        values = [self.evaluate(gameState, a) for a in actions]
-        # print('eval time for agent %d: %.4f' % (self.index, time.time() - start))
+        pelletPositions = self.getFood(gameState).asList()
+        successorPosition = successor.getAgentPosition(self.index)
 
-        maxValue = max(values)
-        bestActions = [a for a, v in zip(actions, values) if v == maxValue]
+        enemies = [successor.getAgentState(i)
+                   for i in self.getOpponents(successor)]
+        ghostPositions = [a.getPosition() for a in enemies if not a.isPacman and a.getPosition()]
 
-        foodLeft = len(self.getFood(gameState).asList())
+        print(ghostPositions)
 
-        if foodLeft <= 2:
-            bestDist = 9999
-            for action in actions:
-                successor = self.getSuccessor(gameState, action)
-                pos2 = successor.getAgentPosition(self.index)
-                dist = self.getMazeDistance(self.start, pos2)
-                if dist < bestDist:
-                    bestAction = action
-                    bestDist = dist
-            return bestAction
+        if len(ghostPositions) > 0:
+          features['ghosts-1-step-away'] = -sum(self.getMazeDistance(successorPosition, ghostPosition) <= 1 for ghostPosition in ghostPositions)
 
-        return random.choice(bestActions)
+        print('Ghosts 1 step away', features['ghosts-1-step-away'])
+
+        nearestPellet = min(pelletPositions, key=lambda x: self.getMazeDistance(successorPosition, x))
+        distanceToNearestPellet = self.getMazeDistance(successorPosition, nearestPellet)
+
+        print('Distance to nearest pellet', distanceToNearestPellet)
+
+        if not features['ghosts-1-step-away'] and distanceToNearestPellet: 
+          features['minDistanceToFood'] = -distanceToNearestPellet
+
+        return features
 
     def getWeights(self, gameState, action):
         """
         Normally, weights do not depend on the gamestate.  They can be either
         a counter or a dictionary.
         """
-        return {'successorScore': 1.0}
+        return { 'ghosts-1-step-away': 100.0, 'minDistanceToFood': 1.0 }
