@@ -40,7 +40,7 @@ WEIGHT_PATH = 'weights_MY_TEAM.json'
 #################
 
 def createTeam(firstIndex, secondIndex, isRed,
-              first = 'PelletChaserAgent', second = 'PelletChaserAgent'):
+              first = 'PelletChaserAgent', second = 'DefensiveAgent'):
  """
  This function should return a list of two agents that will form the
  team, initialized using firstIndex and secondIndex as their agent
@@ -77,7 +77,9 @@ class QLearningAgent(CaptureAgent):
         # start = time.time()
         values = [self.evaluate(gameState, a) for a in actions]
 
-        print("Values:", values)
+        if self.index == 1:
+          print("Actions:", actions)
+          print("Values:", values)
 
         # print('eval time for agent %d: %.4f' % (self.index, time.time() - start))
         foodLeft = len(self.getFood(gameState).asList())
@@ -125,6 +127,15 @@ class QLearningAgent(CaptureAgent):
         """
         features = self.getFeatures(gameState, action)
         weights = self.getWeights(gameState, action)
+
+        # if offensive agent
+        if self.index == 1:
+          print("=====================")
+          # print position of agent
+          print(gameState.getAgentPosition(self.index))
+          print(features)
+          print(features * weights)
+          print("=====================")
         return features * weights
 
     def getWeights(self, gameState, action):
@@ -132,7 +143,7 @@ class QLearningAgent(CaptureAgent):
         Normally, weights do not depend on the gamestate.  They can be either
         a counter or a dictionary.
         """
-        return {'minDistanceToFood': 1.0}
+        return {'successorScore': 1.0}
     
 class PelletChaserAgent(QLearningAgent):
     
@@ -150,17 +161,57 @@ class PelletChaserAgent(QLearningAgent):
                    for i in self.getOpponents(successor)]
         ghostPositions = [a.getPosition() for a in enemies if not a.isPacman and a.getPosition()]
 
-        print(ghostPositions)
+        scaredGhosts = len([a for a in enemies if a.scaredTimer > 0]) > 0 
+
+        successorActions = successor.getLegalActions(self.index)
+        currPosition = gameState.getAgentPosition(self.index)
+
+        # Filter out the stop position from successorActions and also filter out any actions which would result in the agent moving back to the same position
+        successorActions = [a for a in successorActions if a != 'Stop' and successor.getAgentPosition(self.index) != currPosition]
+
+        # print(successorActions)
+
+        if action == Directions.STOP:
+            features['stop'] = 1
+
+        if len(successorActions) == 1:
+          print("Deadend based on successor actions")
+          if sum(self.getMazeDistance(currPosition, ghostPosition) <= 3 for ghostPosition in ghostPositions) > 0:
+            features['deadend'] = 1
+        # else:
+        #   numOfDeadEnds = 0
+
+        #   for potential_action in successorActions:
+        #     nextSuccessor = self.getSuccessor(successor, potential_action)
+        #     nextSuccessorActions = nextSuccessor.getLegalActions(self.index)
+        #     currPosition = nextSuccessor.getAgentState(self.index).getPosition()
+        #     nextSuccessorActions = [a for a in nextSuccessorActions if a != 'Stop' and self.getSuccessor(nextSuccessor, a).getAgentState(self.index).getPosition() != currPosition]
+            
+        #     if len(nextSuccessorActions) == 1:
+        #       numOfDeadEnds += 1
+          
+        #   if numOfDeadEnds == len(successorActions):
+        #     print("Deadend based on successor actions length")
+        #     if sum(self.getMazeDistance(currPosition, ghostPosition) <= 2 for ghostPosition in ghostPositions) > 0:
+        #       features['deadend'] = 1
+
+        # print("DEADEND FEATURE", features['deadend'])
+
+        pelletsHeld = gameState.getAgentState(self.index).numCarrying
+        foodLeft = len(self.getFood(gameState).asList())
+        if (pelletsHeld / (foodLeft + pelletsHeld)) * 100 > 35:
+            print("GOING BACK HOME", self.index)
+            features['distanceToHome'] = -self.getMazeDistance(successorPosition, self.start)
 
         if len(ghostPositions) > 0:
           features['ghosts-1-step-away'] = -sum(self.getMazeDistance(successorPosition, ghostPosition) <= 1 for ghostPosition in ghostPositions)
 
-        print('Ghosts 1 step away', features['ghosts-1-step-away'])
+        # print('Ghosts 1 step away', features['ghosts-1-step-away'])
 
         nearestPellet = min(pelletPositions, key=lambda x: self.getMazeDistance(successorPosition, x))
         distanceToNearestPellet = self.getMazeDistance(successorPosition, nearestPellet)
 
-        print('Distance to nearest pellet', distanceToNearestPellet)
+        # print('Distance to nearest pellet', distanceToNearestPellet)
 
         if not features['ghosts-1-step-away'] and distanceToNearestPellet: 
           features['minDistanceToFood'] = -distanceToNearestPellet
@@ -172,4 +223,19 @@ class PelletChaserAgent(QLearningAgent):
         Normally, weights do not depend on the gamestate.  They can be either
         a counter or a dictionary.
         """
-        return { 'ghosts-1-step-away': 100.0, 'minDistanceToFood': 1.0 }
+        return { 'distanceToHome': 25, 'successorScore': 100,  'ghosts-1-step-away': 100, 'minDistanceToFood': 1, 'deadend': -200, 'stop': -100 }
+    
+class DefensiveAgent(QLearningAgent):
+   def getFeatures(self, gameState, action):
+      features = util.Counter()
+      if action == Directions.STOP:
+            features['stop'] = 1
+      return features
+   
+   def getWeights(self, gameState, action):
+        """
+        Normally, weights do not depend on the gamestate.  They can be either
+        a counter or a dictionary.
+        """
+        return { 'stop': 100 }
+      
