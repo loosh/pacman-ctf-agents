@@ -153,77 +153,93 @@ class PelletChaserAgent(QLearningAgent):
         """
         features = util.Counter()
         successor = self.getSuccessor(gameState, action)
-
-        pelletPositions = self.getFood(gameState).asList()
-        successorPosition = successor.getAgentPosition(self.index)
+        
+        currPos = gameState.getAgentPosition(self.index)
+        successorPos = successor.getAgentState(self.index).getPosition()
+        foodList = self.getFood(gameState).asList()
 
         enemies = [successor.getAgentState(i)
                    for i in self.getOpponents(successor)]
-        ghostPositions = [a.getPosition() for a in enemies if not a.isPacman and a.getPosition()]
+        ghosts = [a for a in enemies if not a.isPacman and not a.scaredTimer > 1 and a.getPosition()]
+        # scaredGhosts = len([a for a in enemies if a.scaredTimer > 0]) > 0 
 
-        scaredGhosts = len([a for a in enemies if a.scaredTimer > 0]) > 0 
+        print("CURRENT POSITION:", currPos)
+        print("ACTION:", action)
 
-        successorActions = successor.getLegalActions(self.index)
-        currPosition = gameState.getAgentPosition(self.index)
-
-        # Filter out the stop position from successorActions and also filter out any actions which would result in the agent moving back to the same position
-        successorActions = [a for a in successorActions if a != 'Stop' and successor.getAgentPosition(self.index) != currPosition]
-
-        # print(successorActions)
-
+        # Don't want to stop
         if action == Directions.STOP:
             features['stop'] = 1
 
-        if len(successorActions) == 1:
-          print("Deadend based on successor actions")
-          if sum(self.getMazeDistance(currPosition, ghostPosition) <= 3 for ghostPosition in ghostPositions) > 0:
-            features['deadend'] = 1
-        # else:
-        #   numOfDeadEnds = 0
+        # Don't want to reverse
+        rev = Directions.REVERSE[gameState.getAgentState(
+            self.index).configuration.direction]
+        if action == rev:
+            features['reverse'] = 1
 
-        #   for potential_action in successorActions:
-        #     nextSuccessor = self.getSuccessor(successor, potential_action)
-        #     nextSuccessorActions = nextSuccessor.getLegalActions(self.index)
-        #     currPosition = nextSuccessor.getAgentState(self.index).getPosition()
-        #     nextSuccessorActions = [a for a in nextSuccessorActions if a != 'Stop' and self.getSuccessor(nextSuccessor, a).getAgentState(self.index).getPosition() != currPosition]
-            
-        #     if len(nextSuccessorActions) == 1:
-        #       numOfDeadEnds += 1
-          
-        #   if numOfDeadEnds == len(successorActions):
-        #     print("Deadend based on successor actions length")
-        #     if sum(self.getMazeDistance(currPosition, ghostPosition) <= 2 for ghostPosition in ghostPositions) > 0:
-        #       features['deadend'] = 1
+        minGhostDistance = float('inf')
+        if len(ghosts) > 0:
+            minGhostDistance = min([self.getMazeDistance(successorPos, a.getPosition()) for a in ghosts])
+            # Set to 0 if the the successor position is death (back to start) it won't be chosen
+            features['distanceToGhost'] = minGhostDistance if minGhostDistance < 3 else 0
 
-        # print("DEADEND FEATURE", features['deadend'])
+        successorActions = successor.getLegalActions(self.index)
 
+        # Filter out the stop position from successorActions and also filter out any actions which would result in the agent moving back to the same position
+        successorActions = [a for a in successorActions if a != 'Stop' and self.getSuccessor(successor, a).getAgentPosition(self.index) != currPos]
+
+        # Check if successor action is a dead end, which PacMan shuoldn't take if there's a ghost nearby
+        if len(successorActions) == 0 and minGhostDistance <= 3:
+          features['deadEnd'] = 1
+        else:
+          deadEnds = 0
+          numberOfSuccessorActions = len(successorActions)
+          for action in successorActions:
+              nextSuccessor = self.getSuccessor(successor, action)
+              nextSuccessorPos = nextSuccessor.getAgentPosition(self.index)
+              nextSuccessorActions = nextSuccessor.getLegalActions(self.index)
+
+              nextSuccessorActions = [a for a in nextSuccessorActions if a != 'Stop' and self.getSuccessor(nextSuccessor, a).getAgentPosition(self.index) != successorPos]
+
+              if len(nextSuccessorActions) == 0:
+                  deadEnds += 1
+              else:
+                  allDeadEnds = 0
+                  numberOfNextSuccessorActions = len(nextSuccessorActions)
+                  for nextAction in nextSuccessorActions:
+                      nextNextSuccessor = self.getSuccessor(nextSuccessor, nextAction)
+                      nextNextSuccessorActions = nextNextSuccessor.getLegalActions(self.index)
+
+                      nextNextSuccessorActions = [a for a in nextNextSuccessorActions if a != 'Stop' and self.getSuccessor(nextNextSuccessor, a).getAgentPosition(self.index) != nextSuccessorPos]
+
+                      if len(nextNextSuccessorActions) == 0:
+                        allDeadEnds += 1
+
+                  if allDeadEnds == numberOfNextSuccessorActions:
+                    deadEnds += 1
+
+          print(deadEnds, successorActions) 
+          if deadEnds == numberOfSuccessorActions and minGhostDistance <= 4:
+            features['deadEnd'] = 1 
+
+        # Return to home if 10 (arbitrary number for now) pellets are being held by the agent
         pelletsHeld = gameState.getAgentState(self.index).numCarrying
-        foodLeft = len(self.getFood(gameState).asList())
-        if (pelletsHeld / (foodLeft + pelletsHeld)) * 100 > 35:
-            print("GOING BACK HOME", self.index)
-            features['distanceToHome'] = -self.getMazeDistance(successorPosition, self.start)
+        if pelletsHeld >= 10:
+            features['distanceToHome'] = -self.getMazeDistance(successorPos, self.start)
 
-        if len(ghostPositions) > 0:
-          features['ghosts-1-step-away'] = -sum(self.getMazeDistance(successorPosition, ghostPosition) <= 1 for ghostPosition in ghostPositions)
 
-        # print('Ghosts 1 step away', features['ghosts-1-step-away'])
-
-        nearestPellet = min(pelletPositions, key=lambda x: self.getMazeDistance(successorPosition, x))
-        distanceToNearestPellet = self.getMazeDistance(successorPosition, nearestPellet)
-
-        # print('Distance to nearest pellet', distanceToNearestPellet)
-
-        if not features['ghosts-1-step-away'] and distanceToNearestPellet: 
-          features['minDistanceToFood'] = -distanceToNearestPellet
+        if len(foodList) > 0:
+            minFoodDistance = min([self.getMazeDistance(successorPos, food) for food in foodList])
+            features['distanceToFood'] = minFoodDistance
 
         return features
-
+        
+        
     def getWeights(self, gameState, action):
         """
         Normally, weights do not depend on the gamestate.  They can be either
         a counter or a dictionary.
         """
-        return { 'distanceToHome': 25, 'successorScore': 100,  'ghosts-1-step-away': 100, 'minDistanceToFood': 1, 'deadend': -200, 'stop': -100 }
+        return { 'distanceToHome': 0.5, 'successorScore': 100,  'distanceToGhost': 50, 'distanceToFood': -1, 'deadEnd': -500, 'stop': -100, 'reverse': -2}
     
 class DefensiveAgent(QLearningAgent):
    def getFeatures(self, gameState, action):
