@@ -210,9 +210,9 @@ class PelletChaserAgent(QLearningAgent):
 
         minGhostDistance = float('inf')
     
-        ghosts = [a for a in enemies if not a.isPacman and a.getPosition() != None]
+        ghosts = [a for a in enemies if not a.isPacman and a.scaredTimer < 1 and a.getPosition() != None]
         if len(ghosts) > 0:
-            minGhostDistance = min([self.getMazeDistance(currPos, a.getPosition()) for a in ghosts]) + 1
+            minGhostDistance = min([self.getMazeDistance(successorPos, a.getPosition()) for a in ghosts]) + 1
             features['distanceToGhost'] = minGhostDistance
 
         successorActions = successor.getLegalActions(self.index)
@@ -256,12 +256,12 @@ class PelletChaserAgent(QLearningAgent):
         centerLine = 16 if self.red else 17
         distanceToCenter = abs(successorPos[0] - centerLine)
 
-        if pelletsHeld >= 1 and distanceToCenter <= 1:
-            features['distanceToHome'] = -self.getMazeDistance(successorPos, self.start)
-
         if len(foodList) > 0:
             minFoodDistance = min([self.getMazeDistance(successorPos, food) for food in foodList])
             features['distanceToFood'] = minFoodDistance
+
+        if pelletsHeld >= 1 and distanceToCenter <= 1 and features['distanceToFood'] > 2:
+            features['distanceToHome'] = -self.getMazeDistance(successorPos, self.start)
 
         return features  
 
@@ -280,7 +280,7 @@ class PelletChaserAgent(QLearningAgent):
         Normally, weights do not depend on the gamestate.  They can be either
         a counter or a dictionary.
         """
-        return { 'distanceToHome': 5, 'successorScore': 100,  'distanceToGhost': 150, 'distanceToFood': -1, 'deadEnd': -500, 'stop': -175, 'reverse': -2}
+        return { 'distanceToHome': 5, 'successorScore': 100,  'distanceToGhost': 30, 'distanceToFood': -1, 'deadEnd': -500, 'stop': -175, 'reverse': -2}
     
 class DefensiveAgent(QLearningAgent):
     """
