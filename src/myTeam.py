@@ -25,7 +25,7 @@ import json
 
 # Set TRAINING to True while agents are learning, False if in deployment
 # [!] Submit your final team with this set to False!
-TRAINING = True
+TRAINING = False
 
 # Name of weights / any agent parameters that should persist between
 # games. Should be loaded at the start of any game, training or otherwise
@@ -69,6 +69,8 @@ class QLearningAgent(CaptureAgent):
 
         # Load Q-values from weights file
         self.loadQValues(WEIGHT_PATH)
+
+        print("Loaded weights:", self.weights)
 
         CaptureAgent.registerInitialState(self, gameState)
 
@@ -133,10 +135,12 @@ class QLearningAgent(CaptureAgent):
         else:
             action = self.computeActionFromQValues(gameState)
 
-        if TRAINING:
-          # Calculate reward for the chosen action
-          reward = self.getReward(gameState, action)
+        # Calculate reward for the chosen action
+        reward = self.getReward(gameState, action)
 
+        # print(reward, action)
+
+        if TRAINING:
           # Get next state
           nextState = self.getSuccessor(gameState, action)
 
@@ -234,31 +238,37 @@ class QLearningAgent(CaptureAgent):
         distanceFromStart = self.getMazeDistance(currentPos, self.start)
         prevDistanceFromStart = self.getMazeDistance(previousPos, self.start)
 
+        if len(state.getLegalActions(self.index)) == 1:
+            reward -= 0.4
+
+        if self.__class__.__name__ == 'PelletChaserAgent' and not state.getAgentState(self.index).isPacman:
+            reward -= 1.5
+
         if currentPos == previousPos:
-            reward -= 1
+            reward -= 0.5
 
         # We want to move away from the start position
         if distanceFromStart > prevDistanceFromStart:
-            reward += distanceFromStart - prevDistanceFromStart
+            reward += (distanceFromStart - prevDistanceFromStart) / 10
         else:
-            reward -= 4
+            reward -= 0.4
 
         # If agent isn't in start position and moves to start position (aka dies), penalize
         if currentPos == self.start and previousPos != self.start:
-            reward -= 5
+            reward -= 0.5
       
         if len(currentFoodList) > 0:
             currentMinFoodDistance = min([self.getMazeDistance(currentPos, food) for food in currentFoodList])
             previousMinFoodDistance = min([self.getMazeDistance(previousPos, food) for food in previousFoodList])
 
             if currentMinFoodDistance < previousMinFoodDistance:
-                reward += 2
+                reward += 0.3
 
         if self.getScore(state) > self.getScore(previousState):
-            reward += 10
+            reward += 1
 
         if len(self.getFood(state).asList()) < len(self.getFood(previousState).asList()):
-            reward += 3
+            reward += 0.3
 
         return reward 
 
@@ -285,7 +295,7 @@ class QLearningAgent(CaptureAgent):
             valid_weights = all_weights and all_weights.get(self.__class__.__name__, None)
             self.weights = all_weights.get(self.__class__.__name__, util.Counter())
 
-            if valid_weights:
+            if valid_weights and valid_weights != {}:
                 self.scaleWeights()
                         
     def final(self, state):
@@ -360,7 +370,7 @@ class PelletChaserAgent(QLearningAgent):
 
         # Don't want to stop
         if action == Directions.STOP:
-            features['stop'] = 1
+            features['stop'] = -1
         else:
             features['stop'] = 0
 
@@ -377,11 +387,13 @@ class PelletChaserAgent(QLearningAgent):
     
         ghosts = [a for a in enemies if not a.isPacman and a.scaredTimer < 1 and a.getPosition()]
         currentGhosts = [a for a in currentEnemies if not a.isPacman and not a.scaredTimer > 1 and a.getPosition()]
+        features['minDistanceToGhost_3'] = 0
         if len(ghosts) > 0:
             minGhostDistance = min([self.getMazeDistance(successorPos, a.getPosition()) for a in ghosts]) + 1
             # features['minDistanceToGhost_1'] = 1 if minGhostDistance <= 1 else 0
             # features['minDistanceToGhost_2'] = 1 if minGhostDistance <= 2 else 0
-            features['minDistanceToGhost_3'] = 1 if minGhostDistance <= 3 else 0
+            if minGhostDistance:
+                features['minDistanceToGhost_3'] = 1
         if len(currentGhosts) > 0:
             currentGhostDistance = min([self.getMazeDistance(currPos, a.getPosition()) for a in currentGhosts]) + 1
 
@@ -403,14 +415,14 @@ class PelletChaserAgent(QLearningAgent):
         if self.red:
             flippedPos = (31-currPos[0], 15-currPos[1])
             if deadEndMoves.get(flippedPos) is not None and deadEndMoves.get(flippedPos).get('action') == self.flipDirection(action) and minGhostDistance <=  deadEndMoves.get(flippedPos).get('length'):
-              features['deadEnd'] = 1
+              features['deadEnd'] = -1
         else:
           if deadEndMoves.get(flippedPos) is not None and deadEndMoves.get(flippedPos).get('action') == action and minGhostDistance <=  deadEndMoves.get(flippedPos).get('length'):
-              features['deadEnd'] = 1
+              features['deadEnd'] = -1
 
         # Check if successor action is a dead end, which PacMan shuoldn't take if there's a ghost nearby
         if len(successorActions) == 0 and minGhostDistance <= 3:
-          features['deadEnd'] = 1
+          features['deadEnd'] = -1
 
         # if features['deadEnd'] == 1:
           # print("Moving", action ,"is a dead end from this position", currPos)
@@ -430,11 +442,17 @@ class PelletChaserAgent(QLearningAgent):
 
         successorFoodList = self.getFood(successor).asList()
         if len(foodList) > 2:
-            minFoodDistance = min([self.getMazeDistance(successorPos, food) for food in foodList])
+            minFoodDistance = min([self.getMazeDistance(currPos, food) for food in foodList])
             minSuccessorFoodDistance = min([self.getMazeDistance(successorPos, food) for food in successorFoodList])
+
+            # print("MIN FOOD DISTANCE:", minFoodDistance)
+            # print("MIN SUCCESSOR FOOD DISTANCE:", minSuccessorFoodDistance)
+
             features['distanceToFood'] = 1 if minSuccessorFoodDistance < minFoodDistance else 0
         else:
             features['distanceToFood'] = 0
+
+        print(features['distanceToFood'])
         
         firstFoodPosition = (10, 14)
         redFirstFoodPosition = (21, 1)
@@ -498,18 +516,28 @@ class DefensiveAgent(QLearningAgent):
             features['onDefense'] = 1
 
         # Computes distance to invaders we can see
+        currentEnemies = [gameState.getAgentState(i)
+                    for i in self.getOpponents(gameState)]
+        currentInvaders = [a for a in currentEnemies if a.isPacman and a.getPosition()]
+
         enemies = [successor.getAgentState(i)
                    for i in self.getOpponents(successor)]
         invaders = [a for a in enemies if a.isPacman and a.getPosition()
                     != None]
-        features['numInvaders'] = len(invaders)
+        features['invadersExist'] = 1 if len(invaders) > 0 else 0
+        
+        features['closerToInvaders'] = 0
         if len(invaders) > 0:
             dists = [self.getMazeDistance(
                 myPos, a.getPosition()) for a in invaders]
-            features['invaderDistance'] = min(dists)
+            currentDists = [self.getMazeDistance(
+                myPos, a.getPosition()) for a in currentInvaders]
+
+            if min(dists) < min(currentDists):
+                features['closerToInvaders'] = 1
 
         if action == Directions.STOP:
-            features['stop'] = 1
+            features['stop'] = -1
         else:
             features['stop'] = 0
         
