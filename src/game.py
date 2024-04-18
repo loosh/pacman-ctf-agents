@@ -655,7 +655,7 @@ class Game:
 
         while not self.gameOver:
             if not self.muteAgents: 
-                time.sleep(0.1)
+                time.sleep(0)
             # Fetch the next agent
             agent = self.agents[agentIndex]
             move_time = 0

@@ -1,14 +1,1 @@
-{
-  "PelletChaserAgent": {
-    "distanceToFood": 6.788495209024216,
-    "stop": -0.0007065759683739436,
-    "reverse": 0.15232796168617482
-  },
-  "DefensiveAgent": {
-    "onDefense": -67676136537467.13,
-    "numInvaders": -75717553511821.03,
-    "stop": 8191096602770.03,
-    "reverse": -3978637770372.9214,
-    "invaderDistance": -2011440953933739.0
-  }
-}
+{"PelletChaserAgent": {"stop": -0.5288276954461104, "reverse": -0.293912610251528, "closerToGhost": -0.05974362988673269, "deadEnd": -2.3743006813619167e-163, "distanceToFood": -1.4896078010560998, "minDistanceToGhost_3": 1.462655850670536e-35}, "DefensiveAgent": {"onDefense": -0.02603500769062833, "numInvaders": 0.038449689927196266, "reverse": -1.0, "stop": -0.40742738988031757, "invaderDistance": 0.8533431644433255}}
