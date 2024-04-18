@@ -68,7 +68,7 @@ class QLearningAgent(CaptureAgent):
         self.weights = util.Counter()
 
         # Load Q-values from weights file
-        # self.loadQValues(WEIGHT_PATH)
+        self.loadQValues(WEIGHT_PATH)
 
         CaptureAgent.registerInitialState(self, gameState)
 
@@ -103,8 +103,18 @@ class QLearningAgent(CaptureAgent):
             if q_value == max_value and util.flipCoin(0.5):
                 max_value = q_value
                 best_action = action
-                
+
         return best_action
+    
+    def scaleWeights(self):
+        """
+        Scales the weights between -1 and 1 inclusive
+        """
+        max_abs_weight = max(abs(w) for w in self.weights.values())
+        if max_abs_weight != 0:
+            for feature in self.weights:
+                self.weights[feature] /= max_abs_weight
+                self.weights[feature] = max(min(self.weights[feature], 1), -1)
        
     def chooseAction(self, gameState):
         """
@@ -171,21 +181,6 @@ class QLearningAgent(CaptureAgent):
             return successor.generateSuccessor(self.index, action)
         else:
             return successor
-
-    def evaluate(self, gameState, action):
-        """
-        Computes a linear combination of features and feature weights
-        """
-        features = self.getFeatures(gameState, action)
-        weights = self.getWeights(gameState, action)
-
-        print("=====================")
-        # Print position of agent and features and weights
-        print(gameState.getAgentPosition(self.index))
-        print(features)
-        print(features * weights)
-        print("=====================")
-        return features * weights
     
     def getWeights(self):
         return self.weights
@@ -195,7 +190,6 @@ class QLearningAgent(CaptureAgent):
           Should return Q(state,action) = w * featureVector
           where * is the dotProduct operator
         """
-        "*** YOUR CODE HERE ***"
         total = 0
         for feature, value in self.getFeatures(state, action).items():
             total += value * self.weights[feature]
@@ -208,6 +202,8 @@ class QLearningAgent(CaptureAgent):
         """
            Should update your weights based on transition
         """
+        self.scaleWeights()
+
         difference = (reward + DISCOUNT * self.getValue(nextState)) - self.getQValue(state, action)
         for feature, value in self.getFeatures(state, action).items():
             self.weights[feature] = self.weights[feature] + LEARNING_RATE * difference * value
@@ -230,15 +226,26 @@ class QLearningAgent(CaptureAgent):
         currentPos = state.getAgentPosition(self.index)
         previousPos = previousState.getAgentPosition(self.index)
 
+        startPositions = {
+            'red': [(1,2), (1,1)],
+            'blue': [(28, 14), (28, 13)]
+        }
+        myTeam = "red" if self.red else "blue"
+        
+        # If agent isn't in start position and moves to start position (aka dies), penalize
+        if currentPos in startPositions[myTeam] and previousPos not in startPositions[myTeam]:
+            reward -= 5
+      
         if len(currentFoodList) > 0:
             currentMinFoodDistance = min([self.getMazeDistance(currentPos, food) for food in currentFoodList])
             previousMinFoodDistance = min([self.getMazeDistance(previousPos, food) for food in previousFoodList])
 
             if currentMinFoodDistance < previousMinFoodDistance:
-                reward += 1
+                reward += 2
 
         if self.getScore(state) > self.getScore(previousState):
             reward += 10
+
         if len(self.getFood(state).asList()) < len(self.getFood(previousState).asList()):
             reward += 3
 
@@ -265,6 +272,8 @@ class QLearningAgent(CaptureAgent):
         with open(file_path, 'r') as f:
             all_weights = json.load(f)
             self.weights = all_weights.get(self.__class__.__name__, util.Counter())
+
+        self.scaleWeights()
             
     def final(self, state):
         """Called at the end of each game."""
@@ -334,12 +343,16 @@ class PelletChaserAgent(QLearningAgent):
         # Don't want to stop
         if action == Directions.STOP:
             features['stop'] = 1
+        else:
+            features['stop'] = 0
 
         # Don't want to reverse
         rev = Directions.REVERSE[gameState.getAgentState(
             self.index).configuration.direction]
         if action == rev:
             features['reverse'] = 1
+        else:
+            features['reverse'] = 0
 
         minGhostDistance = float('inf')
     
@@ -440,6 +453,8 @@ class DefensiveAgent(QLearningAgent):
         features['onDefense'] = 1
         if myState.isPacman:
             features['onDefense'] = 0
+        else:
+            features['onDefense'] = 1
 
         # Computes distance to invaders we can see
         enemies = [successor.getAgentState(i)
@@ -458,6 +473,8 @@ class DefensiveAgent(QLearningAgent):
             self.index).configuration.direction]
         if action == rev:
             features['reverse'] = 1
+        else:
+            features['reverse'] = 0
 
         return features
 
