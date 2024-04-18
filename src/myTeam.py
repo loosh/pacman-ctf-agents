@@ -418,8 +418,6 @@ class PelletChaserAgent(QLearningAgent):
         # Return to home if 10 (arbitrary number for now) pellets are being held by the agent
         pelletsHeld = gameState.getAgentState(self.index).numCarrying
         
-        # print("PELLETS HELD:", pelletsHeld)
-
         # If my agent is a ghost
         if not gameState.getAgentState(self.index).isPacman:
             self.desiredPellets = (3 * len(foodList)) // 10
@@ -431,26 +429,32 @@ class PelletChaserAgent(QLearningAgent):
         distanceToCenter = abs(successorPos[0] - centerLine)
 
         successorFoodList = self.getFood(successor).asList()
-        if len(foodList) > 0:
+        if len(foodList) > 2:
             minFoodDistance = min([self.getMazeDistance(successorPos, food) for food in foodList])
             minSuccessorFoodDistance = min([self.getMazeDistance(successorPos, food) for food in successorFoodList])
             features['distanceToFood'] = 1 if minSuccessorFoodDistance < minFoodDistance else 0
+        else:
+            features['distanceToFood'] = 0
         
         firstFoodPosition = (10, 14)
         redFirstFoodPosition = (21, 1)
 
-        if firstFoodPosition in foodList or redFirstFoodPosition in foodList:
-            features['distanceToFood'] = 1
+        # if firstFoodPosition in foodList or redFirstFoodPosition in foodList:
+        #     features['distanceToFood'] = 1
 
-        if pelletsHeld >= self.desiredPellets and features['distanceToFood'] > 5:
-            features['headHome'] = 1
+        # if pelletsHeld >= self.desiredPellets and features['distanceToFood'] > 5:
+        #     features['headHome'] = 1
 
-        if pelletsHeld >= 1 and distanceToCenter <= 1 and features['distanceToFood'] > 2:
-            features['headHome'] = 1
+        # if pelletsHeld >= 1 and distanceToCenter <= 1 and features['distanceToFood'] > 2:
+        #     features['headHome'] = 1
+
+        successorDistanceToStart = self.getMazeDistance(successorPos, self.start)
+        currentDistanceToStart = self.getMazeDistance(currPos, self.start)
 
         if len(foodList) <= 2:
-            features['headHome'] = 1
-            features['distanceToFood'] = 0
+            features['headHome'] = 1 if successorDistanceToStart < currentDistanceToStart else 0
+        else:
+            features['headHome'] = 0
 
         return features  
 
