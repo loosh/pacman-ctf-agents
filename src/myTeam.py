@@ -17,6 +17,7 @@ import random, time, util
 from game import Directions
 import game
 from util import nearestPoint
+import json
 
 ##################
 # Game Constants #
@@ -29,11 +30,10 @@ TRAINING = True
 # Name of weights / any agent parameters that should persist between
 # games. Should be loaded at the start of any game, training or otherwise
 # [!] Replace MY_TEAM with your team name
-WEIGHT_PATH = 'weights_MY_TEAM.json'
-
-# Any other constants used for your training (learning rate, discount, etc.)
-# should be specified here
-# [!] TODO
+WEIGHT_PATH = 'weights_ghostbusters.json'
+LEARNING_RATE = 0.1
+DISCOUNT = 0.9
+EPSILON = 0.1
 
 #################
 # Team creation #
@@ -65,39 +65,90 @@ def createTeam(firstIndex, secondIndex, isRed,
 class QLearningAgent(CaptureAgent):
     def registerInitialState(self, gameState):
         self.start = gameState.getAgentPosition(self.index)
+        self.weights = util.Counter()
+
+        # Load Q-values from weights file
+        # self.loadQValues(WEIGHT_PATH)
+
         CaptureAgent.registerInitialState(self, gameState)
 
+    def computeValueFromQValues(self, gameState):
+      """
+        Returns max_action Q(state,action)
+        where the max is over legal actions.  Note that if
+        there are no legal actions, which is the case at the
+        terminal state, you should return a value of 0.0.
+      """
+      action = self.computeActionFromQValues(gameState)
+      return self.getQValue(gameState, action) if action else 0.0
+
+    def computeActionFromQValues(self, gameState):
+        """
+          Compute the best action to take in a state.  Note that if there
+          are no legal actions, which is the case at the terminal state,
+          you should return None.
+        """
+        max_value = float('-inf')
+        best_action = None
+        actions = gameState.getLegalActions(self.index)
+
+        if len(actions) == 0:
+            return None
+        
+        for action in actions:
+            q_value = self.getQValue(gameState, action)
+            if q_value > max_value:
+                max_value = q_value
+                best_action = action
+            if q_value == max_value and util.flipCoin(0.5):
+                max_value = q_value
+                best_action = action
+                
+        return best_action
+       
     def chooseAction(self, gameState):
         """
         Picks among the actions with the highest Q(s,a).
         """
-        actions = gameState.getLegalActions(self.index)
+        legalActions = gameState.getLegalActions(self.index)
 
         # You can profile your evaluation time by uncommenting these lines
         # start = time.time()
-        values = [self.evaluate(gameState, a) for a in actions]
-
-        if self.index == 0:
-          print("Actions:", actions)
-          print("Values:", values)
-
-        # print('eval time for agent %d: %.4f' % (self.index, time.time() - start))
-        foodLeft = len(self.getFood(gameState).asList())
-        maxValue = max(values)
-        bestActions = [a for a, v in zip(actions, values) if v == maxValue]
         
-        if foodLeft <= 2:
-            bestDist = 9999
-            for action in actions:
-                successor = self.getSuccessor(gameState, action)
-                pos2 = successor.getAgentPosition(self.index)
-                dist = self.getMazeDistance(self.start, pos2)
-                if dist < bestDist:
-                    bestAction = action
-                    bestDist = dist
-            return bestAction
+        if len(legalActions) == 0:
+            return None
 
-        return random.choice(bestActions)
+        if util.flipCoin(EPSILON):
+            action = random.choice(legalActions)
+        else:
+            action = self.computeActionFromQValues(gameState)
+
+        # Calculate reward for the chosen action
+        reward = self.getReward(gameState, action)
+
+        # Get next state
+        nextState = self.getSuccessor(gameState, action)
+
+        # Update weights based on the observed transition
+        self.update(gameState, action, nextState, reward)
+
+        return action
+
+        # # print('eval time for agent %d: %.4f' % (self.index, time.time() - start))
+        # foodLeft = len(self.getFood(gameState).asList())
+        # maxValue = max(values)
+        # bestActions = [a for a, v in zip(actions, values) if v == maxValue]
+        
+        # if foodLeft <= 2:
+        #     bestDist = 9999
+        #     for action in actions:
+        #         successor = self.getSuccessor(gameState, action)
+        #         pos2 = successor.getAgentPosition(self.index)
+        #         dist = self.getMazeDistance(self.start, pos2)
+        #         if dist < bestDist:
+        #             bestAction = action
+        #             bestDist = dist
+        #     return bestAction
 
     def getFeatures(self, gameState, action):
         """
@@ -128,23 +179,105 @@ class QLearningAgent(CaptureAgent):
         features = self.getFeatures(gameState, action)
         weights = self.getWeights(gameState, action)
 
-        # if offensive agent
-        if self.index == 0:
-          print("=====================")
-          # print position of agent
-          print(gameState.getAgentPosition(self.index))
-          print(features)
-          print(features * weights)
-          print("=====================")
+        print("=====================")
+        # Print position of agent and features and weights
+        print(gameState.getAgentPosition(self.index))
+        print(features)
+        print(features * weights)
+        print("=====================")
         return features * weights
-
-    def getWeights(self, gameState, action):
-        """
-        Normally, weights do not depend on the gamestate.  They can be either
-        a counter or a dictionary.
-        """
-        return {'successorScore': 1.0}
     
+    def getWeights(self):
+        return self.weights
+
+    def getQValue(self, state, action):
+        """
+          Should return Q(state,action) = w * featureVector
+          where * is the dotProduct operator
+        """
+        "*** YOUR CODE HERE ***"
+        total = 0
+        for feature, value in self.getFeatures(state, action).items():
+            total += value * self.weights[feature]
+        return total
+
+    def getValue(self, state):
+        return self.computeValueFromQValues(state)
+
+    def update(self, state, action, nextState, reward: float):
+        """
+           Should update your weights based on transition
+        """
+        difference = (reward + DISCOUNT * self.getValue(nextState)) - self.getQValue(state, action)
+        for feature, value in self.getFeatures(state, action).items():
+            self.weights[feature] = self.weights[feature] + LEARNING_RATE * difference * value
+
+    def getReward(self, state, action):
+        """
+        Returns a reward for the state
+        """
+        previousState = self.getPreviousObservation()
+
+        if previousState is None:
+            return 0
+
+        reward = 0
+
+        # If minDistance to food is less than previous state, reward
+        currentFoodList = self.getFood(state).asList()
+        previousFoodList = self.getFood(previousState).asList()
+
+        currentPos = state.getAgentPosition(self.index)
+        previousPos = previousState.getAgentPosition(self.index)
+
+        if len(currentFoodList) > 0:
+            currentMinFoodDistance = min([self.getMazeDistance(currentPos, food) for food in currentFoodList])
+            previousMinFoodDistance = min([self.getMazeDistance(previousPos, food) for food in previousFoodList])
+
+            if currentMinFoodDistance < previousMinFoodDistance:
+                reward += 1
+
+        if self.getScore(state) > self.getScore(previousState):
+            reward += 10
+        if len(self.getFood(state).asList()) < len(self.getFood(previousState).asList()):
+            reward += 3
+
+        return reward 
+
+    def saveQValues(self, file_path):
+        # Save Q-values to a file
+        existing_weights = {}
+        try:
+            with open(file_path, 'r') as f:
+                existing_weights = json.load(f)
+        except FileNotFoundError:
+            pass
+
+        # Update weights for the current agent
+        existing_weights[self.__class__.__name__] = self.weights
+
+        # Save weights to the file
+        with open(file_path, 'w') as f:
+            json.dump(existing_weights, f)
+
+    def loadQValues(self, file_path):
+        # Load Q-values from a file
+        with open(file_path, 'r') as f:
+            all_weights = json.load(f)
+            self.weights = all_weights.get(self.__class__.__name__, util.Counter())
+            
+    def final(self, state):
+        """Called at the end of each game."""
+        # call the super-class final method
+        super().final(self)
+
+        print("Final called")
+        print("Weights:", self.weights)
+
+        # Save the weights
+        self.saveQValues(WEIGHT_PATH)
+
+
 class PelletChaserAgent(QLearningAgent):
     
     def getFeatures(self, gameState, action):
@@ -195,8 +328,8 @@ class PelletChaserAgent(QLearningAgent):
         ghosts = [a for a in enemies if not a.isPacman and not a.scaredTimer > 1 and a.getPosition()]
         # scaredGhosts = len([a for a in enemies if a.scaredTimer > 0]) > 0 
 
-        print("CURRENT POSITION:", currPos)
-        print("ACTION:", action)
+        # print("CURRENT POSITION:", currPos)
+        # print("ACTION:", action)
 
         # Don't want to stop
         if action == Directions.STOP:
@@ -235,22 +368,19 @@ class PelletChaserAgent(QLearningAgent):
         if len(successorActions) == 0 and minGhostDistance <= 3:
           features['deadEnd'] = 1
 
-        if features['deadEnd'] == 1:
-          print("Moving", action ,"is a dead end from this position", currPos)
+        # if features['deadEnd'] == 1:
+          # print("Moving", action ,"is a dead end from this position", currPos)
 
         # Return to home if 10 (arbitrary number for now) pellets are being held by the agent
         pelletsHeld = gameState.getAgentState(self.index).numCarrying
         
-        print("PELLETS HELD:", pelletsHeld)
+        # print("PELLETS HELD:", pelletsHeld)
 
         # If my agent is a ghost
         if not gameState.getAgentState(self.index).isPacman:
             self.desiredPellets = (3 * len(foodList)) // 10
-
-        print("DESIRED PELLETS:", self.desiredPellets)
-
-        if pelletsHeld >= self.desiredPellets:
-            features['distanceToHome'] = -self.getMazeDistance(successorPos, self.start)
+# 
+        # print("DESIRED PELLETS:", self.desiredPellets)
 
         # Get distance to center line
         centerLine = 16 if self.red else 17
@@ -259,6 +389,15 @@ class PelletChaserAgent(QLearningAgent):
         if len(foodList) > 0:
             minFoodDistance = min([self.getMazeDistance(successorPos, food) for food in foodList])
             features['distanceToFood'] = minFoodDistance
+        
+        firstFoodPosition = (10, 14)
+        redFirstFoodPosition = (21, 1)
+
+        if firstFoodPosition in foodList or redFirstFoodPosition in foodList:
+            features['distanceToFood'] = self.getMazeDistance(successorPos, firstFoodPosition) - 5
+
+        if pelletsHeld >= self.desiredPellets and features['distanceToFood'] > 5:
+            features['distanceToHome'] = -self.getMazeDistance(successorPos, self.start)
 
         if pelletsHeld >= 1 and distanceToCenter <= 1 and features['distanceToFood'] > 2:
             features['distanceToHome'] = -self.getMazeDistance(successorPos, self.start)
@@ -275,12 +414,12 @@ class PelletChaserAgent(QLearningAgent):
         if direction == 'West':
             return 'East' 
 
-    def getWeights(self, gameState, action):
-        """
-        Normally, weights do not depend on the gamestate.  They can be either
-        a counter or a dictionary.
-        """
-        return { 'distanceToHome': 5, 'successorScore': 100,  'distanceToGhost': 30, 'distanceToFood': -1, 'deadEnd': -500, 'stop': -175, 'reverse': -2}
+    # def getWeights(self, gameState, action):
+    #     """
+    #     Normally, weights do not depend on the gamestate.  They can be either
+    #     a counter or a dictionary.
+    #     """
+    #     return { 'distanceToHome': 5, 'successorScore': 100,  'distanceToGhost': 20, 'distanceToFood': -1, 'deadEnd': -500, 'stop': -175, 'reverse': -2}
     
 class DefensiveAgent(QLearningAgent):
     """
