@@ -448,6 +448,10 @@ class PelletChaserAgent(QLearningAgent):
         if pelletsHeld >= 1 and distanceToCenter <= 1 and features['distanceToFood'] > 2:
             features['headHome'] = 1
 
+        if len(foodList) <= 2:
+            features['headHome'] = 1
+            features['distanceToFood'] = 0
+
         return features  
 
     def flipDirection(self, direction):
@@ -502,6 +506,9 @@ class DefensiveAgent(QLearningAgent):
 
         if action == Directions.STOP:
             features['stop'] = 1
+        else:
+            features['stop'] = 0
+        
         rev = Directions.REVERSE[gameState.getAgentState(
             self.index).configuration.direction]
         if action == rev:
