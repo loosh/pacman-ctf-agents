@@ -518,8 +518,10 @@ class DefensiveAgent(QLearningAgent):
         else:
             features['reverse'] = 0
 
-        features = util.Counter()
-        features['tst'] = 1
+        if (len(invaders)==0):
+            features['goToCenter'] = 1
+        else:
+            features['goToCenter'] = 0
 
         return features
 
