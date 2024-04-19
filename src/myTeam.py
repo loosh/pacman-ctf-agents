@@ -25,7 +25,7 @@ import json
 
 # Set TRAINING to True while agents are learning, False if in deployment
 # [!] Submit your final team with this set to False!
-TRAINING = True
+TRAINING = False
 
 # Name of weights / any agent parameters that should persist between
 # games. Should be loaded at the start of any game, training or otherwise
@@ -100,7 +100,7 @@ class QLearningAgent(CaptureAgent):
         
         for action in actions:
             q_value = self.getQValue(gameState, action)
-            if self.index == 0:
+            if self.index == 0 and not TRAINING:
               print("Action:", action)
               print("Q-Value:", q_value)
             if q_value > max_value:
@@ -178,7 +178,7 @@ class QLearningAgent(CaptureAgent):
           where * is the dotProduct operator
         """
         total = 0
-        if self.index == 0:
+        if self.index == 0 and not TRAINING:
           print("Weights:", self.weights)
           print("Features:", self.getFeatures(state, action))
         for feature, value in self.getFeatures(state, action).items():
@@ -200,47 +200,6 @@ class QLearningAgent(CaptureAgent):
         difference = (reward + DISCOUNT * self.getValue(nextState)) - self.getQValue(state, action)
         for feature, value in self.getFeatures(state, action).items():
             self.weights[feature] = self.weights[feature] + LEARNING_RATE * difference * value
-
-    def getReward(self, state, action, nextState):
-        """
-        Returns a reward for the state
-        """
-        currentPos = state.getAgentPosition(self.index)
-        nextPos = nextState.getAgentPosition(self.index)
-
-        if state is None:
-            return 0
-      
-        reward = -0.001
-
-        # If minDistance to food is less than previous state, reward
-        currentFoodList = self.getFood(state).asList()
-        nextFoodList = self.getFood(nextState).asList()
-
-        # Get distance from current position to start position
-        distanceFromStart = self.getMazeDistance(currentPos, self.start)
-        nextDistanceFromStart = self.getMazeDistance(nextPos, self.start)
-
-        if action == Directions.STOP:
-            reward -= 0.5
-
-        if len(nextState.getLegalActions(self.index)) == 1:
-            reward -= 0.5
-
-        if len(currentFoodList) > 0:
-            currentMinFoodDistance = min([self.getMazeDistance(currentPos, food) for food in currentFoodList])
-            nextMinFoodDistance = min([self.getMazeDistance(nextPos, food) for food in nextFoodList])
-
-            if nextMinFoodDistance < currentMinFoodDistance:
-                reward += 1
-
-        if self.getScore(nextState) > self.getScore(state):
-            reward += 15
-
-        if len(nextFoodList) < len(currentFoodList):
-            reward += 5
-
-        return reward 
 
     def saveQValues(self, file_path):
         # Save Q-values to a file
@@ -288,7 +247,7 @@ class PelletChaserAgent(QLearningAgent):
         Returns a counter of features for the state
         """
 
-        deadEndMoves = {
+        self.deadEndMoves = {
             (8,13): {
                 'action': 'South',
                 'length': 8 + 1
@@ -456,6 +415,83 @@ class PelletChaserAgent(QLearningAgent):
         if direction == 'West':
             return 'East' 
 
+    def getReward(self, state, action, nextState):
+        """
+        Returns a reward for the state
+        """
+        currentPos = state.getAgentPosition(self.index)
+        nextPos = nextState.getAgentPosition(self.index)
+
+        if state is None:
+            return 0
+      
+        reward = -0.001
+
+        # If minDistance to food is less than previous state, reward
+        currentFoodList = self.getFood(state).asList()
+        nextFoodList = self.getFood(nextState).asList()
+
+        # Get distance from current position to start position
+        distanceFromStart = self.getMazeDistance(currentPos, self.start)
+        nextDistanceFromStart = self.getMazeDistance(nextPos, self.start)
+
+        currentEnemies = self.getNearbyEnemies(state)
+        nextEnemies = self.getNearbyEnemies(nextState)
+
+        minGhostDistance = float('inf')
+        nextMinGhostDistance = float('inf')
+        
+        if len(nextEnemies) > 0:
+            if len(currentEnemies) == 0:
+                reward -= 2
+            else:
+              minGhostDistance = min([self.getMazeDistance(currentPos, a.getPosition()) for a in currentEnemies]) + 1
+              nextMinGhostDistance = min([self.getMazeDistance(nextPos, a.getPosition()) for a in nextEnemies]) + 1
+
+              if nextMinGhostDistance < minGhostDistance:
+                  reward -= 10
+
+        # Check if agent is pacman
+        if not nextState.getAgentState(self.index).isPacman and nextDistanceFromStart > distanceFromStart:
+          reward += 1
+
+        rev = Directions.REVERSE[state.getAgentState(
+            self.index).configuration.direction]
+        if action == rev:
+            reward -= 1
+        
+        if action == Directions.STOP:
+            reward -= 2
+
+        if len(currentFoodList) <= 15:
+            # if next position is closer to start
+            if nextDistanceFromStart < distanceFromStart:
+                reward += 50
+
+        # if len(nextState.getLegalActions(self.index)) == 1 and nextMinGhostDistance >= 1 and nextMinGhostDistance <= 3:
+        #     reward -= 0.1
+
+        if len(currentFoodList) > 0:
+            currentMinFoodDistance = min([self.getMazeDistance(currentPos, food) for food in currentFoodList])
+            nextMinFoodDistance = min([self.getMazeDistance(nextPos, food) for food in nextFoodList])
+
+            if nextMinFoodDistance < currentMinFoodDistance:
+                reward += 1
+
+        if self.getScore(nextState) > self.getScore(state):
+            reward += 15
+
+        if len(nextFoodList) < len(currentFoodList):
+            reward += 5
+
+        return reward 
+
+    def getNearbyEnemies(self, state):
+        enemies = [state.getAgentState(i)
+                   for i in self.getOpponents(state)]
+        ghosts = [a for a in enemies if not a.isPacman and not a.scaredTimer > 0 and a.getPosition()]
+        return ghosts
+
     # def getWeights(self, gameState, action):
     #     """
     #     Normally, weights do not depend on the gamestate.  They can be either
@@ -518,12 +554,62 @@ class DefensiveAgent(QLearningAgent):
         else:
             features['reverse'] = 0
 
-        if (len(invaders)==0):
-            features['goToCenter'] = 1
-        else:
-            features['goToCenter'] = 0
+        # if (len(invaders)==0):
+        #     features['goToCenter'] = 1
+        # else:
+        #     features['goToCenter'] = 0
 
         return features
 
-    def getWeights(self, gameState, action):
-        return {'numInvaders': -1000, 'onDefense': 100, 'invaderDistance': -10, 'stop': -100, 'reverse': -2}
+    def getReward(self, state, action, nextState):
+        """
+        Returns a reward for the state
+        """
+        currentPos = state.getAgentPosition(self.index)
+        nextPos = nextState.getAgentPosition(self.index)
+
+        if state is None:
+            return 0
+      
+        reward = -0.001
+
+        # If minDistance to food is less than previous state, reward
+        currentFoodList = self.getFood(state).asList()
+        nextFoodList = self.getFood(nextState).asList()
+
+        # Get distance from current position to start position
+        distanceFromStart = self.getMazeDistance(currentPos, self.start)
+        nextDistanceFromStart = self.getMazeDistance(nextPos, self.start)
+
+        centerLine = 16 if self.red else 17
+        nextPosDistToCenter = self.getMazeDistance(nextPos, (centerLine, 7))
+        currentPosDistToCenter = self.getMazeDistance(currentPos, (centerLine, 7))
+
+        if nextPos == self.start:
+            reward -= 5
+
+        if nextPosDistToCenter < currentPosDistToCenter:
+            reward += 3
+
+        # Check if agent is pacman
+        if not nextState.getAgentState(self.index).isPacman and nextDistanceFromStart > distanceFromStart:
+          reward += 1
+
+        rev = Directions.REVERSE[state.getAgentState(
+            self.index).configuration.direction]
+        if action == rev:
+            reward -= 1
+        
+        if action == Directions.STOP:
+            reward -= 2
+
+        if len(nextState.getLegalActions(self.index)) == 1:
+            reward -= 0.1
+
+        if self.getScore(nextState) > self.getScore(state):
+            reward += 15
+
+        return reward 
+
+    # def getWeights(self, gameState, action):
+    #     return {'numInvaders': -1000, 'onDefense': 100, 'invaderDistance': -10, 'stop': -100, 'reverse': -2}

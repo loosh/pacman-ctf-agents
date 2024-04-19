@@ -1,1 +1,1 @@
-{}
+{"PelletChaserAgent": {"stop": -0.0017059827540568753, "reverse": 0.850898326360135, "distanceToFood": 1.0, "headHome": 0.0}, "DefensiveAgent": {"onDefense": 0.8120846994579559, "invadersExist": -0.003872067709722452, "closerToInvaders": 0.0, "stop": -0.12428370534955728, "reverse": 0.8805850030357782}}
