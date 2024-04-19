@@ -240,6 +240,14 @@ class QLearningAgent(CaptureAgent):
         if len(nextFoodList) < len(currentFoodList):
             reward += 5
 
+        # Computes distance to invaders we can see
+        currentEnemies = [nextState.getAgentState(i)
+                    for i in self.getOpponents(nextState)]
+        currentInvaders = [a for a in currentEnemies if a.isPacman and a.getPosition()]
+
+        if len(currentInvaders) == 0:
+            reward += 5
+
         return reward 
 
     def saveQValues(self, file_path):
