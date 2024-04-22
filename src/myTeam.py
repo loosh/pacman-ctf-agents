@@ -259,12 +259,21 @@ class PelletChaserAgent(QLearningAgent):
         foodList = self.getFood(gameState).asList()
         successorFoodList = self.getFood(successor).asList()
 
-        features['distanceToFood'] = 0
-        if len(successorFoodList) > 0 and len(foodList) > 0:  
+        enemies = self.getNearbyEnemies(gameState)
+        numCarrying = gameState.getAgentState(self.index).numCarrying
+
+        features['movingTowardsFood'] = 0
+        features['movingTowardsGhost'] = 0
+        if len(enemies) > 0 and numCarrying > 0:
+            minGhostDist = min([self.getMazeDistance(currPos, ghost.getPosition()) for ghost in enemies])
+            successorGhostDist = min([self.getMazeDistance(successorPos, ghost.getPosition()) for ghost in enemies])
+            if minGhostDist > successorGhostDist:
+                features['movingTowardsGhost'] = 1
+        elif len(foodList) > 0:  
           minFoodDist = min([self.getMazeDistance(currPos, food) for food in foodList])
           successorFoodDist = min([self.getMazeDistance(successorPos, food) for food in foodList])
           if minFoodDist < successorFoodDist:
-              features['distanceToFood'] = 1 
+              features['movingTowardsFood'] = 1 
         
         features['eatsFood'] = 0
         if len(successorFoodList) < len(foodList):
@@ -272,9 +281,8 @@ class PelletChaserAgent(QLearningAgent):
 
         homeDist = self.getMazeDistance(currPos, self.start)
         successorHomeDist = self.getMazeDistance(successorPos, self.start)
-        numCarrying = gameState.getAgentState(self.index).numCarrying
 
-        features['distanceToHome'] = 1 if homeDist > successorHomeDist and numCarrying > 1 else 0
+        features['distanceToHome'] = 1 if homeDist > successorHomeDist and numCarrying > 2 else 0
 
         # Don't want to stop
         if action == Directions.STOP:
@@ -355,6 +363,17 @@ class PelletChaserAgent(QLearningAgent):
         if pos == self.start:
             reward -= 0.7
 
+        enemies = self.getNearbyEnemies(state)
+        nextEnemies = self.getNearbyEnemies(nextState)
+
+        if len(nextEnemies) > len(enemies):
+            reward -= 0.4
+        elif len(enemies) > 0 and len(nextEnemies) > 0:
+            minGhostDist = min([self.getMazeDistance(pos, ghost.getPosition()) for ghost in nextEnemies])
+            nextMinGhostDist = min([self.getMazeDistance(nextPos, ghost.getPosition()) for ghost in nextEnemies])
+            if nextMinGhostDist < minGhostDist:
+                reward -= 0.6
+
         # Check if pacman moves closer to the nearest food
         if len(nextFoodList) > 0 and len(foodList) > 0:
             minFoodDist = min([self.getMazeDistance(pos, food) for food in foodList])
@@ -378,18 +397,19 @@ class PelletChaserAgent(QLearningAgent):
         homeDist = self.getMazeDistance(pos, self.start)
         nextHomeDist = self.getMazeDistance(nextPos, self.start)
         numCarrying = state.getAgentState(self.index).numCarrying
-        if numCarrying > 1:
+        if numCarrying > 2:
             if homeDist > nextHomeDist:
                 reward += 0.5
 
+        # Pacman dies
+        distanceFromStart = self.getMazeDistance(pos, self.start)
+        if nextPos == self.start and distanceFromStart > 5:
+            if self.index == 0 and DEBUG:
+              print("Pacman died")
+            reward -= 1
+
         return reward 
     
-        # Pacman dies
-        # if nextPos == self.start and distanceFromStart > 5:
-        #     if self.index == 0 and DEBUG:
-        #       print("Pacman died")
-        #     reward -= 20
-
         # if not myState.isPacman:
         #     reward -= 10
 
@@ -472,6 +492,8 @@ class DefensiveAgent(QLearningAgent):
         # print("Recently visited food:", self.recentlyVisitedFood)
         # print("Team food list:", teamFoodList)
         # print("My position:", currPos)
+
+        # print("Invaders:", successorInvaders)
 
         if currPos in teamFoodList:
             self.recentlyVisitedFood.append(currPos)
