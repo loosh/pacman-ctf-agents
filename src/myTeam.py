@@ -18,6 +18,7 @@ from game import Directions
 import game
 from util import nearestPoint
 import json
+import numpy as np
 
 ##################
 # Game Constants #
@@ -312,13 +313,13 @@ class PelletChaserAgent(QLearningAgent):
             if minGhostDist > successorGhostDist:
                 features['movingTowardsGhost'] = 1
         else:
-          features['distanceToHome'] = 1 if homeDist > successorHomeDist and numCarrying > 2 else 0
+            features['distanceToHome'] = 1 if homeDist > successorHomeDist and numCarrying > 2 else 0
 
-          if len(foodList) > 0:  
-            minFoodDist = min([self.getMazeDistance(currPos, food) for food in foodList])
-            successorFoodDist = min([self.getMazeDistance(successorPos, food) for food in foodList])
-            if minFoodDist < successorFoodDist:
-                features['movingTowardsFood'] = 1 
+            if len(foodList) > 0:  
+                minFoodDist = min([self.getMazeDistance(currPos, food) for food in foodList])
+                successorFoodDist = min([self.getMazeDistance(successorPos, food) for food in foodList])
+                if minFoodDist < successorFoodDist:
+                    features['movingTowardsFood'] = 1 
 
         features['enteringDeadEnd'] = 0
 
@@ -330,10 +331,10 @@ class PelletChaserAgent(QLearningAgent):
         if self.red:
             flippedPos = (31-currPos[0], 15-currPos[1])
             if self.deadEndMoves.get(flippedPos) is not None and self.deadEndMoves.get(flippedPos).get('action') == self.flipDirection(action) and successorGhostDist <=  self.deadEndMoves.get(flippedPos).get('length'):
-              features['enteringDeadEnd'] = 1
+                features['enteringDeadEnd'] = 1
         else:
-          if self.deadEndMoves.get(flippedPos) is not None and self.deadEndMoves.get(flippedPos).get('action') == action and successorGhostDist <=  self.deadEndMoves.get(flippedPos).get('length'):
-              features['enteringDeadEnd'] = 1
+            if self.deadEndMoves.get(flippedPos) is not None and self.deadEndMoves.get(flippedPos).get('action') == action and successorGhostDist <=  self.deadEndMoves.get(flippedPos).get('length'):
+                features['enteringDeadEnd'] = 1
         
         features['eatsFood'] = 0
         if len(successorFoodList) < len(foodList):
@@ -344,17 +345,11 @@ class PelletChaserAgent(QLearningAgent):
             features['stop'] = 1
         else:
             features['stop'] = 0
-            
 
-        # # Don't want to reverse
-        # rev = Directions.REVERSE[gameState.getAgentState(
-        #     self.index).configuration.direction]
-        # if action == rev:
-        #     features['reverse'] = 1
-        # else:
-        #     features['reverse'] = 0
+        # Should return home sensitive features
+        features['headedHome'] = 1 if successorHomeDist < homeDist else 0
 
-        return features  
+        return features
 
     def flipDirection(self, direction):
         if direction == 'North':
@@ -376,7 +371,7 @@ class PelletChaserAgent(QLearningAgent):
 
         if state is None:
             return 0
-      
+
         reward = 0
 
         # If minDistance to food is less than previous state, reward
@@ -385,7 +380,6 @@ class PelletChaserAgent(QLearningAgent):
 
         if pos == nextPos:
             reward -= 0.3
-
         if pos == self.start:
             reward -= 0.7
 
@@ -407,24 +401,24 @@ class PelletChaserAgent(QLearningAgent):
         if len(nextFoodList) > 0 and len(foodList) > 0:
             minFoodDist = min([self.getMazeDistance(pos, food) for food in foodList])
             nextMinFoodDist = min([self.getMazeDistance(nextPos, food) for food in nextFoodList])
-
             if nextMinFoodDist < minFoodDist:
                 reward += 0.4
             else:
                 reward -= 0.4
 
         if abs(self.getScore(nextState)) > abs(self.getScore(state)):
-          if self.index == 0 and DEBUG:
-            print("Score increased")
-          reward += 1
-          
+            if self.index == 0 and DEBUG:
+                print("Score increased")
+            reward += 1
+
         if len(nextFoodList) < len(foodList):
             if self.index == 0 and DEBUG:
-              print("Eating food")
+                print("Eating food")
             reward += 0.5
 
         homeDist = self.getMazeDistance(pos, self.start)
         nextHomeDist = self.getMazeDistance(nextPos, self.start)
+
         numCarrying = state.getAgentState(self.index).numCarrying
         if numCarrying > 2:
             if homeDist > nextHomeDist:
@@ -434,10 +428,18 @@ class PelletChaserAgent(QLearningAgent):
         distanceFromStart = self.getMazeDistance(pos, self.start)
         if nextPos == self.start and distanceFromStart > 5:
             if self.index == 0 and DEBUG:
-              print("Pacman died")
+                print("Pacman died")
             reward -= 1
 
-        return reward 
+        if features['headedHome'] == 1 and features['movingTowardsFood'] == 0:
+            if numCarrying == 0:
+                reward = 0
+            else:
+                # Modify the reward based on the number of pellets the agent is holding
+                reward_factor = numCarrying / 10  # Adjust the factor as needed
+                reward += 1 * reward_factor
+
+        return reward
     
         # if not myState.isPacman:
         #     reward -= 10
