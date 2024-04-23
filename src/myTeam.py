@@ -324,16 +324,16 @@ class PelletChaserAgent(QLearningAgent):
 
         if len(successorActions) == 0 and successorGhostDist <= 4:
             features['enteringDeadEnd'] = 1
-
-        # Check if the agent is in a dead end
-        flippedPos = currPos
-        if self.red:
-            flippedPos = (31-currPos[0], 15-currPos[1])
-            if self.deadEndMoves.get(flippedPos) is not None and self.deadEndMoves.get(flippedPos).get('action') == self.flipDirection(action) and successorGhostDist <=  self.deadEndMoves.get(flippedPos).get('length'):
-              features['enteringDeadEnd'] = 1
         else:
-          if self.deadEndMoves.get(flippedPos) is not None and self.deadEndMoves.get(flippedPos).get('action') == action and successorGhostDist <=  self.deadEndMoves.get(flippedPos).get('length'):
-              features['enteringDeadEnd'] = 1
+          # Check if the agent is in a dead end
+          flippedPos = currPos
+          if self.red:
+              flippedPos = (31-currPos[0], 15-currPos[1])
+              if self.deadEndMoves.get(flippedPos) is not None and self.deadEndMoves.get(flippedPos).get('action') == self.flipDirection(action) and successorGhostDist <=  self.deadEndMoves.get(flippedPos).get('length'):
+                features['enteringDeadEnd'] = 1
+          else:
+            if self.deadEndMoves.get(flippedPos) is not None and self.deadEndMoves.get(flippedPos).get('action') == action and successorGhostDist <=  self.deadEndMoves.get(flippedPos).get('length'):
+                features['enteringDeadEnd'] = 1
         
         features['eatsFood'] = 0
         if len(successorFoodList) < len(foodList):
@@ -344,15 +344,6 @@ class PelletChaserAgent(QLearningAgent):
             features['stop'] = 1
         else:
             features['stop'] = 0
-            
-
-        # # Don't want to reverse
-        # rev = Directions.REVERSE[gameState.getAgentState(
-        #     self.index).configuration.direction]
-        # if action == rev:
-        #     features['reverse'] = 1
-        # else:
-        #     features['reverse'] = 0
 
         return features  
 
@@ -401,27 +392,27 @@ class PelletChaserAgent(QLearningAgent):
             minGhostDist = min([self.getMazeDistance(pos, ghost.getPosition()) for ghost in nextEnemies])
             nextMinGhostDist = min([self.getMazeDistance(nextPos, ghost.getPosition()) for ghost in nextEnemies])
             if nextMinGhostDist < minGhostDist:
-                reward -= 0.6
+                reward -= 0.7
 
         # Check if pacman moves closer to the nearest food
         if len(nextFoodList) > 0 and len(foodList) > 0:
             minFoodDist = min([self.getMazeDistance(pos, food) for food in foodList])
-            nextMinFoodDist = min([self.getMazeDistance(nextPos, food) for food in nextFoodList])
+            nextMinFoodDist = min([self.getMazeDistance(nextPos, food) for food in foodList])
 
             if nextMinFoodDist < minFoodDist:
-                reward += 0.4
+                reward += 0.2
             else:
-                reward -= 0.4
+                reward -= 0.2
 
         if abs(self.getScore(nextState)) > abs(self.getScore(state)):
           if self.index == 0 and DEBUG:
             print("Score increased")
-          reward += 1
+          reward += 2
           
         if len(nextFoodList) < len(foodList):
             if self.index == 0 and DEBUG:
               print("Eating food")
-            reward += 0.5
+            reward += 0.8
 
         homeDist = self.getMazeDistance(pos, self.start)
         nextHomeDist = self.getMazeDistance(nextPos, self.start)
@@ -435,23 +426,15 @@ class PelletChaserAgent(QLearningAgent):
         if nextPos == self.start and distanceFromStart > 5:
             if self.index == 0 and DEBUG:
               print("Pacman died")
-            reward -= 1
+            reward -= 5
 
         return reward 
-    
-        # if not myState.isPacman:
-        #     reward -= 10
-
-        # Get distance from current position to start position
-        # distanceFromStart = self.getMazeDistance(pos, self.start)
-        # nextDistanceFromStart = self.getMazeDistance(nextPos, self.start)
-
-        # myState = nextState.getAgentState(self.index)
 
     def getNearbyEnemies(self, state):
+        position = state.getAgentPosition(self.index)
         enemies = [state.getAgentState(i)
                    for i in self.getOpponents(state)]
-        ghosts = [a for a in enemies if not a.isPacman and not a.scaredTimer > 0 and a.getPosition()]
+        ghosts = [a for a in enemies if not a.isPacman and not a.scaredTimer > 0 and a.getPosition() != None and self.getMazeDistance(position, a.getPosition()) <= 5]
         return ghosts
   
 
@@ -505,24 +488,11 @@ class DefensiveAgent(QLearningAgent):
             features['stop'] = 1
         else:
             features['stop'] = 0
-        
-        # rev = Directions.REVERSE[gameState.getAgentState(
-        #     self.index).configuration.direction]
-        # if action == rev:
-        #     features['reverse'] = 1
-        # else:
-        #     features['reverse'] = 0
 
         teamFoodList = self.getFoodYouAreDefending(gameState).asList()
 
         # Intersection to remove food from visited that other pacman might have eaten
         self.recentlyVisitedFood = list(set(self.recentlyVisitedFood)&set(teamFoodList))
-
-        # print("Recently visited food:", self.recentlyVisitedFood)
-        # print("Team food list:", teamFoodList)
-        # print("My position:", currPos)
-
-        # print("Invaders:", successorInvaders)
 
         if currPos in teamFoodList:
             self.recentlyVisitedFood.append(currPos)
