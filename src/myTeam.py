@@ -15,6 +15,7 @@
 from captureAgents import CaptureAgent
 import random, time, util
 from game import Directions
+from game import Actions
 import game
 from util import nearestPoint
 import json
@@ -25,7 +26,7 @@ import json
 
 # Set TRAINING to True while agents are learning, False if in deployment
 # [!] Submit your final team with this set to False!
-TRAINING = False
+TRAINING = True
 DEBUG = False
 
 # Name of weights / any agent parameters that should persist between
@@ -65,6 +66,8 @@ def createTeam(firstIndex, secondIndex, isRed,
 
 class QLearningAgent(CaptureAgent):
     def registerInitialState(self, gameState):
+        CaptureAgent.registerInitialState(self, gameState)
+
         self.start = gameState.getAgentPosition(self.index)
         self.weights = util.Counter()
 
@@ -74,7 +77,12 @@ class QLearningAgent(CaptureAgent):
         print("Loaded weights:", self.weights)
         self.lastAction = None
 
-        CaptureAgent.registerInitialState(self, gameState)
+        myTeam = self.getTeam(gameState)
+
+        opponentIndices = self.getOpponents(gameState)
+        if self.index == myTeam[0]:
+            for i, opponentIndex in enumerate(opponentIndices):
+                particleFilters[i].initializeParticles(gameState, opponentIndex, first=True)
 
     def computeValueFromQValues(self, gameState):
       """
@@ -131,6 +139,17 @@ class QLearningAgent(CaptureAgent):
 
         # You can profile your evaluation time by uncommenting these lines
         # start = time.time()
+
+        self.ghost_estimates = []
+
+        myTeam = self.getTeam(gameState)
+        opponentIndices = self.getOpponents(gameState)
+        for i, opponentIndex in enumerate(opponentIndices):
+            particleFilters[i].observe(gameState.getAgentDistances()[opponentIndex], gameState, opponentIndex, self.index)
+            if self.index == myTeam[0]:
+                particleFilters[i].elapseTime()
+            positions = particleFilters[i].getBeliefDistribution()
+            self.ghost_estimates.append((max(positions, key=positions.get), gameState.getAgentState(opponentIndex)))
 
         if TRAINING and self.lastAction:
             prevState = self.getPreviousObservation()
@@ -242,11 +261,70 @@ class QLearningAgent(CaptureAgent):
           # Save the weights
           self.saveQValues(WEIGHT_PATH)
 
+class ParticleFilter(CaptureAgent):
+    def __init__(self, numParticles):
+        self.walls = None
+        self.numParticles = numParticles
+
+    def initializeParticles(self, gameState, ghostIndex, first=False):
+        if not self.walls:
+            self.walls = gameState.getWalls().asList()
+        self.particles = []
+        ghostStartPosition = gameState.getInitialAgentPosition(ghostIndex)
+        legalPositions = [p for p in gameState.getWalls().asList(False)]
+        for i in range(self.numParticles):
+              self.particles.append(ghostStartPosition if first else legalPositions[i % len(legalPositions)])
+
+    def observe(self, observation, gameState, ghostIndex, pacmanIndex):
+        noisyDistance = observation
+        pacmanPosition = gameState.getAgentPosition(pacmanIndex)
+        allPossible = util.Counter()
+
+        for p in self.particles:
+            trueDistance = util.manhattanDistance(p, pacmanPosition)
+
+            # print("True distance:", trueDistance)
+            # print("Noisy distance:", noisyDistance)
+
+            allPossible[p] += gameState.getDistanceProb(trueDistance, noisyDistance)
+
+        if allPossible.totalCount() == 0:
+            self.initializeParticles(gameState, ghostIndex)
+            return
+
+        allPossible.normalize()
+        self.particles = [util.sample(allPossible) for i in range(self.numParticles)]
+
+    def elapseTime(self):
+      newParticles = []
+
+      for p in self.particles:
+        directions = [Directions.NORTH, Directions.SOUTH, Directions.EAST, Directions.WEST]
+        legalPositions = [Actions.getSuccessor(p,a) for a in directions if Actions.getSuccessor(p, a) not in self.walls]
+        newParticles.append(random.choice(legalPositions))
+        
+      self.particles = newParticles
+
+    def getBeliefDistribution(self):
+        """
+        Return the agent's current belief state, a distribution over ghost
+        locations conditioned on all evidence and time passage. This method
+        essentially converts a list of particles into a belief distribution (a
+        Counter object)
+        """
+        beliefDistribution = util.Counter()
+        for particle in self.particles:
+            beliefDistribution[particle] += 1
+        beliefDistribution.normalize()
+        return beliefDistribution
+        
+
+particleFilters = [ParticleFilter(400) for i in range(2)]
 
 class PelletChaserAgent(QLearningAgent):
     
-    def __init__(self, index):
-        super().__init__(index)
+    def registerInitialState(self, gameState):
+        super().registerInitialState(gameState)
         self.deadEndMoves = {
             (8,13): {
                 'action': 'South',
@@ -283,6 +361,8 @@ class PelletChaserAgent(QLearningAgent):
         Returns a counter of features for the state
         """
 
+        print(self.ghost_estimates)
+        
         features = util.Counter()
         successor = self.getSuccessor(gameState, action)
         
@@ -302,6 +382,9 @@ class PelletChaserAgent(QLearningAgent):
 
         homeDist = self.getMazeDistance(currPos, self.start)
         successorHomeDist = self.getMazeDistance(successorPos, self.start)
+
+        # Filter out food from foodlist where the distance from that food to one of the ghosts in ghost_estimates[] is less than 5
+        # foodList = [food for food in foodList if min([self.getMazeDistance(food, pos) for (pos, state)  in self.ghost_estimates]) > 5]
 
         features['movingTowardsFood'] = 0
         features['movingTowardsGhost'] = 0
@@ -445,13 +528,19 @@ class DefensiveAgent(QLearningAgent):
     could be like.  It is not the best or only way to make
     such an agent.
     """
-    def __init__(self, index):
-        super().__init__(index)
+    def registerInitialState(self, gameState):
+        super().registerInitialState(gameState)
+
+        self.start = gameState.getAgentPosition(self.index)
+
         self.recentlyVisitedFood = []
+        self.firstDefendedPellet = (14,9) if self.red else (17,6)
 
     def getFeatures(self, gameState, action):
         features = util.Counter()
         successor = self.getSuccessor(gameState, action)
+
+        # estimatedInvaderPositions = [ghost for (ghost, state) in self.ghost_estimates if state.isPacman]
 
         currPos = gameState.getAgentPosition(self.index)
         successorPos = successor.getAgentPosition(self.index)
@@ -475,6 +564,15 @@ class DefensiveAgent(QLearningAgent):
         features['invadersExist'] = 1 if len(successorInvaders) > 0 else 0
         
         features['closerToInvaders'] = 0
+        # if len(estimatedInvaderPositions) > 0:
+        #     dists = min([self.getMazeDistance(
+        #         currPos, a) for a in estimatedInvaderPositions])
+        #     successorDists = min([self.getMazeDistance(
+        #         successorPos, a) for a in estimatedInvaderPositions])
+
+        #     if successorDists < dists:
+        #         features['closerToInvaders'] = 1
+        # el
         if len(successorInvaders) > 0 and len(currentInvaders) > 0:
             dists = min([self.getMazeDistance(
                 currPos, a.getPosition()) for a in currentInvaders])
@@ -491,19 +589,25 @@ class DefensiveAgent(QLearningAgent):
 
         teamFoodList = self.getFoodYouAreDefending(gameState).asList()
 
-        # Intersection to remove food from visited that other pacman might have eaten
-        self.recentlyVisitedFood = list(set(self.recentlyVisitedFood)&set(teamFoodList))
+        if not self.firstDefendedPellet in teamFoodList:
+          # Intersection to remove food from visited that other pacman might have eaten
+          self.recentlyVisitedFood = list(set(self.recentlyVisitedFood)&set(teamFoodList))
 
-        if currPos in teamFoodList:
-            self.recentlyVisitedFood.append(currPos)
+          if currPos in teamFoodList:
+              self.recentlyVisitedFood.append(currPos)
 
-        if len(teamFoodList) == len(self.recentlyVisitedFood):
-            self.recentlyVisitedFood = [currPos]
+          if len(teamFoodList) == len(self.recentlyVisitedFood):
+              self.recentlyVisitedFood = [currPos]
 
-        teamFoodList = list(set(teamFoodList)-set(self.recentlyVisitedFood))
+          teamFoodList = list(set(teamFoodList)-set(self.recentlyVisitedFood))
 
         features['closerToFood'] = 0
-        if len(teamFoodList) > 0 and len(successorInvaders) == 0:
+        if self.firstDefendedPellet in teamFoodList:
+            distance = self.getMazeDistance(currPos, self.firstDefendedPellet)
+            nextDistance = self.getMazeDistance(successorPos, self.firstDefendedPellet)
+            if nextDistance < distance:
+                features['closerToFood'] = 1
+        elif len(teamFoodList) > 0 and len(successorInvaders) == 0:
             minFoodDist = min([self.getMazeDistance(currPos, food) for food in teamFoodList])
             successorMinFoodDist = min([self.getMazeDistance(successorPos, food) for food in teamFoodList])
 
