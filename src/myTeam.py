@@ -26,7 +26,7 @@ import json
 
 # Set TRAINING to True while agents are learning, False if in deployment
 # [!] Submit your final team with this set to False!
-TRAINING = True
+TRAINING = False
 DEBUG = False
 
 # Name of weights / any agent parameters that should persist between
@@ -278,13 +278,15 @@ class ParticleFilter(CaptureAgent):
     def observe(self, observation, gameState, ghostIndex, pacmanIndex):
         noisyDistance = observation
         pacmanPosition = gameState.getAgentPosition(pacmanIndex)
+        ghostPosition = gameState.getAgentPosition(ghostIndex)
         allPossible = util.Counter()
+
+        if ghostPosition is not None:
+            self.particles = [ghostPosition for i in range(self.numParticles)]
+            return
 
         for p in self.particles:
             trueDistance = util.manhattanDistance(p, pacmanPosition)
-
-            # print("True distance:", trueDistance)
-            # print("Noisy distance:", noisyDistance)
 
             allPossible[p] += gameState.getDistanceProb(trueDistance, noisyDistance)
 
@@ -361,8 +363,6 @@ class PelletChaserAgent(QLearningAgent):
         Returns a counter of features for the state
         """
 
-        print(self.ghost_estimates)
-        
         features = util.Counter()
         successor = self.getSuccessor(gameState, action)
         
@@ -532,90 +532,57 @@ class DefensiveAgent(QLearningAgent):
         super().registerInitialState(gameState)
 
         self.start = gameState.getAgentPosition(self.index)
-
-        self.recentlyVisitedFood = []
-        self.firstDefendedPellet = (14,9) if self.red else (17,6)
+        self.centerPellet = (14,9) if self.red else (17,6)
+        self.sections = [1, 5, 10, 14] if self.red else [14, 10, 5, 1]
+        self.entryPoints = [(11,2), (12,6), (12, 13)] if self.red else [(20, 13), (19, 9), (19, 2)]
 
     def getFeatures(self, gameState, action):
         features = util.Counter()
         successor = self.getSuccessor(gameState, action)
 
-        # estimatedInvaderPositions = [ghost for (ghost, state) in self.ghost_estimates if state.isPacman]
+        invaderPositions = [pos for (pos, state) in self.ghost_estimates if state.isPacman]
 
         currPos = gameState.getAgentPosition(self.index)
         successorPos = successor.getAgentPosition(self.index)
         successorState = successor.getAgentState(self.index)
 
-        # Computes whether we're on defense (1) or offense (0)
+        if len(invaderPositions) > 0:
+            # Get closest invader's position
+            closestInvaderPos = min(invaderPositions, key=lambda x: self.getMazeDistance(currPos, x))
+
+            currentDistToInvader = self.getMazeDistance(currPos, closestInvaderPos)
+            if currentDistToInvader <= 5:
+              successorDistToInvader = self.getMazeDistance(successorPos, closestInvaderPos)
+
+              if successorDistToInvader < currentDistToInvader:
+                  features['movingTowardsInvader'] = 1
+            else:
+              y_cord = closestInvaderPos[1]
+              section = 0
+              for i in range(len(self.sections) - 1):
+                  if y_cord >= self.sections[i] and y_cord <= self.sections[i+1]:
+                      section = i
+                      break
+              entryPoint = self.entryPoints[section]
+              distToEntryPoint = self.getMazeDistance(currPos, entryPoint)
+              successorDistToEntryPoint = self.getMazeDistance(successorPos, entryPoint)
+              if successorDistToEntryPoint < distToEntryPoint:
+                  features['movingToEntryPoint'] = 1
+        else:
+          teamFoodList = self.getFoodYouAreDefending(gameState).asList()
+
+          # Move to center pellet
+          features['closerToFood'] = 0
+          if self.centerPellet in teamFoodList:
+              distance = self.getMazeDistance(currPos, self.centerPellet)
+              nextDistance = self.getMazeDistance(successorPos, self.centerPellet)
+              if nextDistance < distance:
+                  features['closerToFood'] = 1
+
+        # On defense or offense
         features['onDefense'] = 1
         if successorState.isPacman:
             features['onDefense'] = 0
-
-        # Computes distance to invaders we can see
-        currentEnemies = [gameState.getAgentState(i)
-                    for i in self.getOpponents(gameState)]
-        currentInvaders = [a for a in currentEnemies if a.isPacman and a.getPosition()]
-
-        successorEnemies = [successor.getAgentState(i)
-                   for i in self.getOpponents(successor)]
-        successorInvaders = [a for a in successorEnemies if a.isPacman and a.getPosition()
-                    != None]
-        
-        features['invadersExist'] = 1 if len(successorInvaders) > 0 else 0
-        
-        features['closerToInvaders'] = 0
-        # if len(estimatedInvaderPositions) > 0:
-        #     dists = min([self.getMazeDistance(
-        #         currPos, a) for a in estimatedInvaderPositions])
-        #     successorDists = min([self.getMazeDistance(
-        #         successorPos, a) for a in estimatedInvaderPositions])
-
-        #     if successorDists < dists:
-        #         features['closerToInvaders'] = 1
-        # el
-        if len(successorInvaders) > 0 and len(currentInvaders) > 0:
-            dists = min([self.getMazeDistance(
-                currPos, a.getPosition()) for a in currentInvaders])
-            successorDists = min([self.getMazeDistance(
-                successorPos, a.getPosition()) for a in currentInvaders])
-
-            if successorDists < dists:
-                features['closerToInvaders'] = 1
-
-        if action == Directions.STOP:
-            features['stop'] = 1
-        else:
-            features['stop'] = 0
-
-        teamFoodList = self.getFoodYouAreDefending(gameState).asList()
-
-        if not self.firstDefendedPellet in teamFoodList:
-          # Intersection to remove food from visited that other pacman might have eaten
-          self.recentlyVisitedFood = list(set(self.recentlyVisitedFood)&set(teamFoodList))
-
-          if currPos in teamFoodList:
-              self.recentlyVisitedFood.append(currPos)
-
-          if len(teamFoodList) == len(self.recentlyVisitedFood):
-              self.recentlyVisitedFood = [currPos]
-
-          teamFoodList = list(set(teamFoodList)-set(self.recentlyVisitedFood))
-
-        features['closerToFood'] = 0
-        if self.firstDefendedPellet in teamFoodList:
-            distance = self.getMazeDistance(currPos, self.firstDefendedPellet)
-            nextDistance = self.getMazeDistance(successorPos, self.firstDefendedPellet)
-            if nextDistance < distance:
-                features['closerToFood'] = 1
-        elif len(teamFoodList) > 0 and len(successorInvaders) == 0:
-            minFoodDist = min([self.getMazeDistance(currPos, food) for food in teamFoodList])
-            successorMinFoodDist = min([self.getMazeDistance(successorPos, food) for food in teamFoodList])
-
-            distance = minFoodDist
-            nextDistance = successorMinFoodDist
-
-            if nextDistance < distance:
-                features['closerToFood'] = 1
            
         return features
 
@@ -631,7 +598,7 @@ class DefensiveAgent(QLearningAgent):
         if state is None:
             return 0
       
-        reward = -0.01
+        reward = 0
 
         currentEnemies = [state.getAgentState(i)
                     for i in self.getOpponents(state)]
@@ -641,19 +608,22 @@ class DefensiveAgent(QLearningAgent):
                     for i in self.getOpponents(nextState)]
         nextInvaders = [a for a in nextEnemies if a.isPacman and a.getPosition()]
 
-        if len(nextInvaders) == 0 and features['closerToFood'] == 1:
-            reward += 0.5
+        if features['movingTowardsInvader'] == 1:
+           reward += 0.2
+
+        if features['movingToEntryPoint'] == 1:
+            reward += 0.2
+
+        if features['closerToFood'] == 1:
+            reward += 0.2
 
         nextAgentState = nextState.getAgentState(self.index)
 
         if nextAgentState.isPacman:
             reward -= 5
-
-        if pos == nextPos:
-            reward -= 0.7
         
-        if len(currentInvaders) > 0 and len(nextInvaders) > 0:
-          minDistanceToInvader = min([self.getMazeDistance(pos, a.getPosition()) for a in currentInvaders])
+        if len(nextInvaders) > 0:
+          minDistanceToInvader = min([self.getMazeDistance(pos, a.getPosition()) for a in nextInvaders])
           nextMinDistanceToInvader = min([self.getMazeDistance(nextPos, a.getPosition()) for a in nextInvaders])
           if nextMinDistanceToInvader < minDistanceToInvader:
               reward += 0.7

@@ -150,7 +150,6 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
         myPos = successor.getAgentState(self.index).getPosition()
 
         # Compute distance to the nearest food
-
         if len(foodList) > 0:  # This should always be True,  but better safe than sorry
             minFoodDistance = min([self.getMazeDistance(myPos, food) for food in foodList])
             features['distanceToFood'] = minFoodDistance
