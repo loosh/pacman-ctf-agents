@@ -242,6 +242,7 @@ class CaptureAgent(Agent):
         else:
             return gameState.getScore() * -1
 
+
     def getMazeDistance(self, pos1, pos2):
         """
         Returns the distance between two points; These are calculated using the provided

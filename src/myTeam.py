@@ -26,7 +26,7 @@ import json
 
 # Set TRAINING to True while agents are learning, False if in deployment
 # [!] Submit your final team with this set to False!
-TRAINING = True
+TRAINING = False
 DEBUG = False
 
 # Name of weights / any agent parameters that should persist between
@@ -35,7 +35,7 @@ DEBUG = False
 WEIGHT_PATH = 'weights_ghostbusters.json'
 LEARNING_RATE = 0.1
 DISCOUNT = 0.9
-EPSILON = 0.1
+EPSILON = 0.2
 
 #################
 # Team creation #
@@ -328,6 +328,8 @@ class PelletChaserAgent(QLearningAgent):
     def registerInitialState(self, gameState):
         super().registerInitialState(gameState)
         self.maxDistance = 70
+        self.ghostAvoidanceDistance = 10
+        self.numPellets = len(self.getFood(gameState).asList())
         self.deadEndMoves = {
             (8,13): {
                 'action': 'South',
@@ -378,52 +380,56 @@ class PelletChaserAgent(QLearningAgent):
 
         # Filter out the stop position from successorActions and also filter out any actions which would result in the agent moving back to the same position
         successorActions = [a for a in successorActions if a != 'Stop' and self.getSuccessor(successor, a).getAgentPosition(self.index) != currPos]
-
-        successorHomeDist = self.getMazeDistance(successorPos, self.start)
-
         ghosts = [pos for (pos, state) in self.ghost_estimates if not state.isPacman and not state.scaredTimer > 0]
 
-        minGhostDist = min([self.getMazeDistance(successorPos, ghost) for ghost in ghosts]) if len(ghosts) > 0 else 0
-        features['minGhostDist'] =  (self.maxDistance - minGhostDist) / self.maxDistance
-        
         features['eatsFood'] = 0
-        features['minDistanceToFood'] = -1
-        if minGhostDist >= 2 and len(successorFoodList) < len(foodList):
-            features['eatsFood'] = 1
-            minDistanceToFood = min([self.getMazeDistance(successorPos, food) for food in foodList]) if len(foodList) > 0 else 0
-            features['minDistanceToFood'] =  (self.maxDistance - minDistanceToFood) / self.maxDistance
+        if len(successorFoodList) < len(foodList):
+          features['eatsFood'] = 1
+
+        if features['eatsFood'] == 1:
+            features[f'eatsPelletAt{str(currPos)}'] = 1
+        elif currPos in foodList:
+            features[f'eatsPelletAt{str(currPos)}'] = 0
+
+        features['eatsCapsule'] = 1 if len(self.getCapsules(gameState)) > len(self.getCapsules(successor)) else 0
+
+        currStartDist = self.getMazeDistance(currPos, self.start)
+        successorStartDist = self.getMazeDistance(successorPos, self.start)
 
         if len(ghosts) > 0:
-            # Get food that is not within 5 steps of a ghost
-            foodList = [food for food in foodList if min([self.getMazeDistance(food, ghost) for ghost in ghosts]) > 10]
+            minDistanceToGhost = min([self.getMazeDistance(currPos, ghost) for ghost in ghosts])
+            successorMinDistanceToGhost = min([self.getMazeDistance(successorPos, ghost) for ghost in ghosts])
+
+            if minDistanceToGhost < 8 and successorMinDistanceToGhost < minDistanceToGhost:
+                features['movesTowardsGhost'] = 1
+
+        features['returnsFood'] = 0
+        if numCarrying > 0 and not features['movesTowardsGhost'] == 1:
+          features['returnsFood'] = 1 if successorStartDist < currStartDist else 0
         
-        # features['numCarrying'] = numCarrying
-        features['distanceToHome'] = (self.maxDistance - successorHomeDist) / self.maxDistance
+        features['numCarrying'] = numCarrying
+          
+        if len(foodList) > 2 and not features['movesTowardsGhost'] == 1:
+          remainingPellets = len(foodList)
+          self.ghostAvoidanceDistance = max(1, 10 - (20 - remainingPellets) * 9 / 18)
+          
+          foodListCopy = foodList.copy()
+          if len(ghosts) > 0:
+            foodList = [food for food in foodList if min([self.getMazeDistance(food, ghost) for ghost in ghosts]) > self.ghostAvoidanceDistance]
+          if len(foodList) == 0:
+            foodList = foodListCopy
+          
+          minDistanceToFood = min([self.getMazeDistance(currPos, food) for food in foodList]) 
+          successorMinDistanceToFood = min([self.getMazeDistance(successorPos, food) for food in foodList])
 
-        # Don't want to stop
-        if action == Directions.STOP:
-            features['stop'] = 1
-        else:
-            features['stop'] = 0
-
-        # features['enteringDeadEnd'] = 0
-        # if len(successorActions) == 0 and minGhostDist <= 4:
-        #     features['enteringDeadEnd'] = 1
-        # else:
-        #   # Check if the agent is in a dead end
-        #   flippedPos = currPos
-        #   if self.red:
-        #       flippedPos = (31-currPos[0], 15-currPos[1])
-        #       if self.deadEndMoves.get(flippedPos) is not None and self.deadEndMoves.get(flippedPos).get('action') == self.flipDirection(action) and minGhostDist <=  self.deadEndMoves.get(flippedPos).get('length'):
-        #         features['enteringDeadEnd'] = 1
-        #   else:
-        #     if self.deadEndMoves.get(flippedPos) is not None and self.deadEndMoves.get(flippedPos).get('action') == action and minGhostDist <=  self.deadEndMoves.get(flippedPos).get('length'):
-        #         features['enteringDeadEnd'] = 1
+          if successorMinDistanceToFood < minDistanceToFood:
+              features['movesCloserToFood'] = 1
 
         # print("Current Position", currPos)
         # print("Action", action)
         # print(features)
         # print("=====================================")
+
 
         return features  
 
@@ -438,49 +444,22 @@ class PelletChaserAgent(QLearningAgent):
         if state is None:
             return 0
       
-        reward = -0.1
+        reward = 0
 
-        # If minDistance to food is less than previous state, reward
-        foodList = self.getFood(state).asList()
-        nextFoodList = self.getFood(nextState).asList()
-        ghosts = [pos for (pos, state) in self.ghost_estimates if not state.isPacman and not state.scaredTimer > 0]
+        if features['eatsFood'] == 1:
+            reward += 1
+        if features['movesCloserToFood'] == 1:
+            reward += 0.1
+        if features['returnsFood'] == 1:
+            reward += 2
+        if features['movesCloserToGhost'] == 1:
+            reward -= 0.5
 
-        if len(nextFoodList) < len(foodList):
-          if self.index == 0 and DEBUG:
-            print("Eating food")
-          reward += 0.5
-
-        if len(ghosts) > 0:
-          # Get food that is not within 5 steps of a ghost
-          foodList = [food for food in foodList if min([self.getMazeDistance(food, ghost) for ghost in ghosts]) > 5]
-
-        if len(foodList) > 0:
-            minDistanceToFood = min([self.getMazeDistance(pos, food) for food in foodList])
-            nextMinDistanceToFood = min([self.getMazeDistance(nextPos, food) for food in foodList])
-            if nextMinDistanceToFood < minDistanceToFood:
-                reward += 0.2
-
-        if pos == nextPos:
-            reward -= 0.3
-
-        if pos == self.start:
-            reward -= 0.7
-            
-        if abs(self.getScore(nextState)) > abs(self.getScore(state)):
-          if self.index == 0 and DEBUG:
-            print("Score increased")
-          reward += 1
-        
-
-        # Pacman dies
-        distanceFromStart = self.getMazeDistance(pos, self.start)
-        if nextPos == self.start and distanceFromStart > 5:
-            if self.index == 0 and DEBUG:
-              print("Pacman died")
-            reward -= 5
+        # If PacMan dies
+        if nextPos == self.start and state.getAgentState(self.index).numCarrying > 0:
+            reward -= 0.6
 
         return reward 
-
 
     def flipDirection(self, direction):
         if direction == 'North':
@@ -532,7 +511,12 @@ class DefensiveAgent(QLearningAgent):
               y_cord = closestInvaderPos[1]
               section = 0
               for i in range(len(self.sections) - 1):
-                  if y_cord >= self.sections[i] and y_cord <= self.sections[i+1]:
+                  if self.red:
+                    if y_cord >= self.sections[i] and y_cord <= self.sections[i+1]:
+                      section = i
+                      break
+                  else:
+                    if y_cord <= self.sections[i] and y_cord >= self.sections[i+1]:
                       section = i
                       break
               entryPoint = self.entryPoints[section]
