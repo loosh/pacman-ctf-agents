@@ -391,8 +391,6 @@ class PelletChaserAgent(QLearningAgent):
         elif currPos in foodList:
             features[f'eatsPelletAt{str(currPos)}'] = 0
 
-        features['eatsCapsule'] = 1 if len(self.getCapsules(gameState)) > len(self.getCapsules(successor)) else 0
-
         currStartDist = self.getMazeDistance(currPos, self.start)
         successorStartDist = self.getMazeDistance(successorPos, self.start)
 
@@ -406,10 +404,7 @@ class PelletChaserAgent(QLearningAgent):
         features['returnsFood'] = 0
         if numCarrying > 0 and not features['movesTowardsGhost'] == 1:
           features['returnsFood'] = 1 if successorStartDist < currStartDist else 0
-        
-        features['numCarrying'] = numCarrying
-          
-        if len(foodList) > 2 and not features['movesTowardsGhost'] == 1:
+        elif len(foodList) > 2 and not features['movesTowardsGhost'] == 1:
           remainingPellets = len(foodList)
           self.ghostAvoidanceDistance = max(1, 10 - (20 - remainingPellets) * 9 / 18)
           
@@ -456,8 +451,8 @@ class PelletChaserAgent(QLearningAgent):
             reward -= 0.5
 
         # If PacMan dies
-        if nextPos == self.start and state.getAgentState(self.index).numCarrying > 0:
-            reward -= 0.6
+        # if nextPos == self.start and state.getAgentState(self.index).numCarrying > 0:
+        #     reward -= 0.6
 
         return reward 
 
