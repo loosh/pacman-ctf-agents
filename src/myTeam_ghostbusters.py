@@ -35,7 +35,7 @@ DEBUG = False
 WEIGHT_PATH = 'weights_ghostbusters.json'
 LEARNING_RATE = 0.1
 DISCOUNT = 0.9
-EPSILON = 0.2
+EPSILON = 0.1
 
 #################
 # Team creation #
@@ -394,16 +394,27 @@ class PelletChaserAgent(QLearningAgent):
         currStartDist = self.getMazeDistance(currPos, self.start)
         successorStartDist = self.getMazeDistance(successorPos, self.start)
 
+        capsulePositions = self.getCapsules(gameState)
+        if len(capsulePositions) > 0 and successorPos in capsulePositions:
+            features['eatsCapsule'] = 1
+
         if len(ghosts) > 0:
             minDistanceToGhost = min([self.getMazeDistance(currPos, ghost) for ghost in ghosts])
             successorMinDistanceToGhost = min([self.getMazeDistance(successorPos, ghost) for ghost in ghosts])
+            features['minDistanceToGhost'] = minDistanceToGhost / self.maxDistance
 
-            if minDistanceToGhost < 8 and successorMinDistanceToGhost < minDistanceToGhost:
+            if minDistanceToGhost < 5 and successorMinDistanceToGhost < minDistanceToGhost:
                 features['movesTowardsGhost'] = 1
 
         features['returnsFood'] = 0
-        if numCarrying > 0 and not features['movesTowardsGhost'] == 1:
-          features['returnsFood'] = 1 if successorStartDist < currStartDist else 0
+
+        minDistanceToFood = min([self.getMazeDistance(currPos, food) for food in foodList]) 
+        if numCarrying > 0 and not features['movesTowardsGhost'] == 1 and len(ghosts) > 0:
+            features['returnsFood'] = 1 if successorStartDist < currStartDist else 0
+        
+        if minDistanceToFood == 1 and (len(ghosts) == 0 or minDistanceToGhost > 3):
+            features['returnsFood'] = 0
+
         elif len(foodList) > 2 and not features['movesTowardsGhost'] == 1:
           remainingPellets = len(foodList)
           self.ghostAvoidanceDistance = max(1, 10 - (20 - remainingPellets) * 9 / 18)
@@ -449,6 +460,8 @@ class PelletChaserAgent(QLearningAgent):
             reward += 2
         if features['movesCloserToGhost'] == 1:
             reward -= 0.5
+        if features['eatsCapsule'] == 1:
+            reward += 0.5
 
         # If PacMan dies
         # if nextPos == self.start and state.getAgentState(self.index).numCarrying > 0:
