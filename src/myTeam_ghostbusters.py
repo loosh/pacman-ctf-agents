@@ -386,6 +386,10 @@ class PelletChaserAgent(QLearningAgent):
         if len(successorFoodList) < len(foodList):
           features['eatsFood'] = 1
 
+        scaredGhosts = [pos for (pos, state) in self.ghost_estimates if not state.isPacman and state.scaredTimer > 0]
+        if len(scaredGhosts) > 0:
+            features['hasPowerPellet'] = 1 if len(scaredGhosts) > 0 else 0
+
         if features['eatsFood'] == 1:
             features[f'eatsPelletAt{str(currPos)}'] = 1
         elif currPos in foodList:
@@ -395,8 +399,10 @@ class PelletChaserAgent(QLearningAgent):
         successorStartDist = self.getMazeDistance(successorPos, self.start)
 
         capsulePositions = self.getCapsules(gameState)
-        if len(capsulePositions) > 0 and successorPos in capsulePositions:
-            features['eatsCapsule'] = 1
+        if len(capsulePositions) > 0:
+            if successorPos in capsulePositions:
+              features['eatsCapsule'] = 1
+            features['distanceToCapsule'] = min([self.getMazeDistance(currPos, capsule) for capsule in capsulePositions]) / self.maxDistance
 
         if len(ghosts) > 0:
             minDistanceToGhost = min([self.getMazeDistance(currPos, ghost) for ghost in ghosts])
@@ -407,6 +413,8 @@ class PelletChaserAgent(QLearningAgent):
                 features['movesTowardsGhost'] = 1
 
         features['returnsFood'] = 0
+        if gameState.getAgentState(self.index).isPacman:
+          features[f'currPos{str(currPos)}'] = 1
 
         minDistanceToFood = min([self.getMazeDistance(currPos, food) for food in foodList]) 
         if numCarrying > 0 and not features['movesTowardsGhost'] == 1 and len(ghosts) > 0:
@@ -426,10 +434,15 @@ class PelletChaserAgent(QLearningAgent):
             foodList = foodListCopy
           
           minDistanceToFood = min([self.getMazeDistance(currPos, food) for food in foodList]) 
+          closestFood = min(foodList, key=lambda food: self.getMazeDistance(currPos, food))
           successorMinDistanceToFood = min([self.getMazeDistance(successorPos, food) for food in foodList])
+
+          features[f'movesTowardsFood{str(closestFood)}'] = 1
 
           if successorMinDistanceToFood < minDistanceToFood:
               features['movesCloserToFood'] = 1
+          
+          features['minDistanceToFood'] = minDistanceToFood / self.maxDistance
 
         # print("Current Position", currPos)
         # print("Action", action)
@@ -464,8 +477,8 @@ class PelletChaserAgent(QLearningAgent):
             reward += 0.5
 
         # If PacMan dies
-        # if nextPos == self.start and state.getAgentState(self.index).numCarrying > 0:
-        #     reward -= 0.6
+        if nextPos == self.start and state.getAgentState(self.index).numCarrying > 0:
+            reward -= 0.6
 
         return reward 
 
