@@ -491,6 +491,8 @@ class PelletChaserAgent(QLearningAgent):
             return 'West'
         if direction == 'West':
             return 'East' 
+
+
 class DefensiveAgent(QLearningAgent):
     """
     A reflex agent that keeps its side Pacman-free. Again,
@@ -521,7 +523,7 @@ class DefensiveAgent(QLearningAgent):
             closestInvaderPos = min(invaderPositions, key=lambda x: self.getMazeDistance(currPos, x))
 
             currentDistToInvader = self.getMazeDistance(currPos, closestInvaderPos)
-            if currentDistToInvader <= 5:
+            if currentDistToInvader <= 2:
               successorDistToInvader = self.getMazeDistance(successorPos, closestInvaderPos)
 
               if successorDistToInvader < currentDistToInvader:
