@@ -26,7 +26,7 @@ import json
 
 # Set TRAINING to True while agents are learning, False if in deployment
 # [!] Submit your final team with this set to False!
-TRAINING = False
+TRAINING = True
 DEBUG = False
 
 # Name of weights / any agent parameters that should persist between
@@ -444,6 +444,9 @@ class PelletChaserAgent(QLearningAgent):
           
           features['minDistanceToFood'] = minDistanceToFood / self.maxDistance
 
+        if action == Directions.STOP:
+            features['stops'] = 1
+
         # print("Current Position", currPos)
         # print("Action", action)
         # print(features)
@@ -476,6 +479,9 @@ class PelletChaserAgent(QLearningAgent):
         if features['eatsCapsule'] == 1:
             reward += 0.5
 
+        if nextPos == pos:
+            reward -= 1
+
         # If PacMan dies
         if nextPos == self.start and state.getAgentState(self.index).numCarrying > 0:
             reward -= 0.6
@@ -491,7 +497,6 @@ class PelletChaserAgent(QLearningAgent):
             return 'West'
         if direction == 'West':
             return 'East' 
-
 
 class DefensiveAgent(QLearningAgent):
     """
@@ -514,23 +519,27 @@ class DefensiveAgent(QLearningAgent):
 
         invaderPositions = [pos for (pos, state) in self.ghost_estimates if state.isPacman]
 
+        # print(invaderPositions)
+
         currPos = gameState.getAgentPosition(self.index)
         successorPos = successor.getAgentPosition(self.index)
         successorState = successor.getAgentState(self.index)
+
+        isScared = gameState.getAgentState(self.index).scaredTimer > 0
 
         if len(invaderPositions) > 0:
             # Get closest invader's position
             closestInvaderPos = min(invaderPositions, key=lambda x: self.getMazeDistance(currPos, x))
 
             currentDistToInvader = self.getMazeDistance(currPos, closestInvaderPos)
-            if currentDistToInvader <= 2:
+            if currentDistToInvader <= 3:
               successorDistToInvader = self.getMazeDistance(successorPos, closestInvaderPos)
 
               if successorDistToInvader < currentDistToInvader:
                   features['movingTowardsInvader'] = 1
-              elif gameState.getAgentState(self.index).scaredTimer > 0:
+              elif isScared:
                   features['movingTowardsInvader'] = 1
-            else:
+            elif not isScared:
               y_cord = closestInvaderPos[1]
               section = 0
               for i in range(len(self.sections) - 1):
@@ -547,7 +556,7 @@ class DefensiveAgent(QLearningAgent):
               successorDistToEntryPoint = self.getMazeDistance(successorPos, entryPoint)
               if successorDistToEntryPoint < distToEntryPoint:
                   features['movingToEntryPoint'] = 1
-        else:
+        elif not isScared:
           teamFoodList = self.getFoodYouAreDefending(gameState).asList()
 
           # Move to center pellet
