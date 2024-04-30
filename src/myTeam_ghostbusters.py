@@ -26,7 +26,11 @@ import json
 
 # Set TRAINING to True while agents are learning, False if in deployment
 # [!] Submit your final team with this set to False!
-TRAINING = True
+
+# MAKE SURE TO TRAIN AS RED TEAM
+TRAINING = False
+# MAKE SURE TO TRAIN AS RED TEAM
+
 DEBUG = False
 
 # Name of weights / any agent parameters that should persist between
@@ -391,9 +395,9 @@ class PelletChaserAgent(QLearningAgent):
             features['hasPowerPellet'] = 1 if len(scaredGhosts) > 0 else 0
 
         if features['eatsFood'] == 1:
-            features[f'eatsPelletAt{str(currPos)}'] = 1
+            features[f'eatsPelletAt{str(self.flipPos(currPos) if not self.red else currPos)}'] = 1
         elif currPos in foodList:
-            features[f'eatsPelletAt{str(currPos)}'] = 0
+            features[f'eatsPelletAt{str(self.flipPos(currPos) if not self.red else currPos)}'] = 0
 
         currStartDist = self.getMazeDistance(currPos, self.start)
         successorStartDist = self.getMazeDistance(successorPos, self.start)
@@ -414,7 +418,7 @@ class PelletChaserAgent(QLearningAgent):
 
         features['returnsFood'] = 0
         if gameState.getAgentState(self.index).isPacman:
-          features[f'currPos{str(currPos)}'] = 1
+          features[f'currPos{str(self.flipPos(currPos) if not self.red else currPos)}'] = 1
 
         minDistanceToFood = min([self.getMazeDistance(currPos, food) for food in foodList]) 
         if numCarrying > 0 and not features['movesTowardsGhost'] == 1 and len(ghosts) > 0:
@@ -488,6 +492,9 @@ class PelletChaserAgent(QLearningAgent):
 
         return reward 
 
+    def flipPos(self, pos):
+        return (31 - pos[0], 15 - pos[1])
+
     def flipDirection(self, direction):
         if direction == 'North':
             return 'South'
@@ -542,7 +549,7 @@ class DefensiveAgent(QLearningAgent):
             elif not isScared:
               y_cord = closestInvaderPos[1]
               section = 0
-              for i in range(len(self.sections) - 1):
+              for i in range(len(self.sections)):
                   if self.red:
                     if y_cord >= self.sections[i] and y_cord <= self.sections[i+1]:
                       section = i
