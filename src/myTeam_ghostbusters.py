@@ -78,7 +78,7 @@ class QLearningAgent(CaptureAgent):
         # Load Q-values from weights file
         self.loadQValues(WEIGHT_PATH)
 
-        print("Loaded weights:", self.weights)
+        #print("Loaded weights:", self.weights)
         self.lastAction = None
 
         myTeam = self.getTeam(gameState)
