@@ -2,4 +2,6 @@
 
 Pacman Capture the Flag Arena of Doom!
 
-** Place all presentation material here, then delete this file. **
+**Link to video**
+
+https://lmu.box.com/s/7mcr1yq6o6p2cq1m92ywmax7nxrj4drx

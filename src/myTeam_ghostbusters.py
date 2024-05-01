@@ -15,6 +15,7 @@
 from captureAgents import CaptureAgent
 import random, time, util
 from game import Directions
+from game import Actions
 import game
 from util import nearestPoint
 import json
@@ -26,7 +27,11 @@ import numpy as np
 
 # Set TRAINING to True while agents are learning, False if in deployment
 # [!] Submit your final team with this set to False!
+
+# MAKE SURE TO TRAIN AS RED TEAM
 TRAINING = False
+# MAKE SURE TO TRAIN AS RED TEAM
+
 DEBUG = False
 
 # Name of weights / any agent parameters that should persist between
@@ -66,16 +71,23 @@ def createTeam(firstIndex, secondIndex, isRed,
 
 class QLearningAgent(CaptureAgent):
     def registerInitialState(self, gameState):
+        CaptureAgent.registerInitialState(self, gameState)
+
         self.start = gameState.getAgentPosition(self.index)
         self.weights = util.Counter()
 
         # Load Q-values from weights file
         self.loadQValues(WEIGHT_PATH)
 
-        print("Loaded weights:", self.weights)
+        #print("Loaded weights:", self.weights)
         self.lastAction = None
 
-        CaptureAgent.registerInitialState(self, gameState)
+        myTeam = self.getTeam(gameState)
+
+        opponentIndices = self.getOpponents(gameState)
+        if self.index == myTeam[0]:
+            for i, opponentIndex in enumerate(opponentIndices):
+                particleFilters[i].initializeParticles(gameState, opponentIndex, first=True)
 
     def computeValueFromQValues(self, gameState):
       """
@@ -102,6 +114,7 @@ class QLearningAgent(CaptureAgent):
         
         for action in actions:
             q_value = self.getQValue(gameState, action)
+
             if self.index == 0 and DEBUG:
               print("Action:", action)
               print("Q-Value:", q_value)
@@ -132,6 +145,17 @@ class QLearningAgent(CaptureAgent):
 
         # You can profile your evaluation time by uncommenting these lines
         # start = time.time()
+
+        self.ghost_estimates = []
+
+        myTeam = self.getTeam(gameState)
+        opponentIndices = self.getOpponents(gameState)
+        for i, opponentIndex in enumerate(opponentIndices):
+            particleFilters[i].observe(gameState.getAgentDistances()[opponentIndex], gameState, opponentIndex, self.index)
+            if self.index == myTeam[0]:
+                particleFilters[i].elapseTime()
+            positions = particleFilters[i].getBeliefDistribution()
+            self.ghost_estimates.append((max(positions, key=positions.get), gameState.getAgentState(opponentIndex)))
 
         if TRAINING and self.lastAction:
             prevState = self.getPreviousObservation()
@@ -243,11 +267,74 @@ class QLearningAgent(CaptureAgent):
           # Save the weights
           self.saveQValues(WEIGHT_PATH)
 
+class ParticleFilter(CaptureAgent):
+    def __init__(self, numParticles):
+        self.walls = None
+        self.numParticles = numParticles
+
+    def initializeParticles(self, gameState, ghostIndex, first=False):
+        if not self.walls:
+            self.walls = gameState.getWalls().asList()
+        self.particles = []
+        ghostStartPosition = gameState.getInitialAgentPosition(ghostIndex)
+        legalPositions = [p for p in gameState.getWalls().asList(False)]
+        for i in range(self.numParticles):
+              self.particles.append(ghostStartPosition if first else legalPositions[i % len(legalPositions)])
+
+    def observe(self, observation, gameState, ghostIndex, pacmanIndex):
+        noisyDistance = observation
+        pacmanPosition = gameState.getAgentPosition(pacmanIndex)
+        ghostPosition = gameState.getAgentPosition(ghostIndex)
+        allPossible = util.Counter()
+
+        if ghostPosition is not None:
+            self.particles = [ghostPosition for i in range(self.numParticles)]
+            return
+
+        for p in self.particles:
+            trueDistance = util.manhattanDistance(p, pacmanPosition)
+
+            allPossible[p] += gameState.getDistanceProb(trueDistance, noisyDistance)
+
+        if allPossible.totalCount() == 0:
+            self.initializeParticles(gameState, ghostIndex)
+            return
+
+        allPossible.normalize()
+        self.particles = [util.sample(allPossible) for i in range(self.numParticles)]
+
+    def elapseTime(self):
+      newParticles = []
+
+      for p in self.particles:
+        directions = [Directions.NORTH, Directions.SOUTH, Directions.EAST, Directions.WEST]
+        legalPositions = [Actions.getSuccessor(p,a) for a in directions if Actions.getSuccessor(p, a) not in self.walls]
+        newParticles.append(random.choice(legalPositions))
+        
+      self.particles = newParticles
+
+    def getBeliefDistribution(self):
+        """
+        Return the agent's current belief state, a distribution over ghost
+        locations conditioned on all evidence and time passage. This method
+        essentially converts a list of particles into a belief distribution (a
+        Counter object)
+        """
+        beliefDistribution = util.Counter()
+        for particle in self.particles:
+            beliefDistribution[particle] += 1
+        beliefDistribution.normalize()
+        return beliefDistribution
+        
+particleFilters = [ParticleFilter(400) for i in range(2)]
 
 class PelletChaserAgent(QLearningAgent):
     
-    def __init__(self, index):
-        super().__init__(index)
+    def registerInitialState(self, gameState):
+        super().registerInitialState(gameState)
+        self.maxDistance = 70
+        self.ghostAvoidanceDistance = 10
+        self.numPellets = len(self.getFood(gameState).asList())
         self.deadEndMoves = {
             (8,13): {
                 'action': 'South',
@@ -293,73 +380,85 @@ class PelletChaserAgent(QLearningAgent):
         foodList = self.getFood(gameState).asList()
         successorFoodList = self.getFood(successor).asList()
 
-        enemies = self.getNearbyEnemies(gameState)
         numCarrying = gameState.getAgentState(self.index).numCarrying
-
         successorActions = successor.getLegalActions(self.index)
 
         # Filter out the stop position from successorActions and also filter out any actions which would result in the agent moving back to the same position
         successorActions = [a for a in successorActions if a != 'Stop' and self.getSuccessor(successor, a).getAgentPosition(self.index) != currPos]
+        ghosts = [pos for (pos, state) in self.ghost_estimates if not state.isPacman and not state.scaredTimer > 0]
 
-        homeDist = self.getMazeDistance(currPos, self.start)
-        successorHomeDist = self.getMazeDistance(successorPos, self.start)
-
-        features['movingTowardsFood'] = 0
-        features['movingTowardsGhost'] = 0
-        successorGhostDist = float('inf')
-        if len(enemies) > 0 and numCarrying > 0:
-            minGhostDist = min([self.getMazeDistance(currPos, ghost.getPosition()) for ghost in enemies])
-            successorGhostDist = min([self.getMazeDistance(successorPos, ghost.getPosition()) for ghost in enemies])
-            if minGhostDist > successorGhostDist:
-                features['movingTowardsGhost'] = 1
-        else:
-            features['distanceToHome'] = 1 if homeDist > successorHomeDist and numCarrying > 2 else 0
-
-            if len(foodList) > 0:  
-                minFoodDist = min([self.getMazeDistance(currPos, food) for food in foodList])
-                successorFoodDist = min([self.getMazeDistance(successorPos, food) for food in foodList])
-                if minFoodDist < successorFoodDist:
-                    features['movingTowardsFood'] = 1 
-
-        features['enteringDeadEnd'] = 0
-
-        if len(successorActions) == 0 and successorGhostDist <= 4:
-            features['enteringDeadEnd'] = 1
-
-        # Check if the agent is in a dead end
-        flippedPos = currPos
-        if self.red:
-            flippedPos = (31-currPos[0], 15-currPos[1])
-            if self.deadEndMoves.get(flippedPos) is not None and self.deadEndMoves.get(flippedPos).get('action') == self.flipDirection(action) and successorGhostDist <=  self.deadEndMoves.get(flippedPos).get('length'):
-                features['enteringDeadEnd'] = 1
-        else:
-            if self.deadEndMoves.get(flippedPos) is not None and self.deadEndMoves.get(flippedPos).get('action') == action and successorGhostDist <=  self.deadEndMoves.get(flippedPos).get('length'):
-                features['enteringDeadEnd'] = 1
-        
         features['eatsFood'] = 0
         if len(successorFoodList) < len(foodList):
-            features['eatsFood'] = 1
+          features['eatsFood'] = 1
 
-        # Don't want to stop
+        scaredGhosts = [pos for (pos, state) in self.ghost_estimates if not state.isPacman and state.scaredTimer > 0]
+        if len(scaredGhosts) > 0:
+            features['hasPowerPellet'] = 1 if len(scaredGhosts) > 0 else 0
+
+        if features['eatsFood'] == 1:
+            features[f'eatsPelletAt{str(self.flipPos(currPos) if not self.red else currPos)}'] = 1
+        elif currPos in foodList:
+            features[f'eatsPelletAt{str(self.flipPos(currPos) if not self.red else currPos)}'] = 0
+
+        currStartDist = self.getMazeDistance(currPos, self.start)
+        successorStartDist = self.getMazeDistance(successorPos, self.start)
+
+        capsulePositions = self.getCapsules(gameState)
+        if len(capsulePositions) > 0:
+            if successorPos in capsulePositions:
+              features['eatsCapsule'] = 1
+            features['distanceToCapsule'] = min([self.getMazeDistance(currPos, capsule) for capsule in capsulePositions]) / self.maxDistance
+
+        if len(ghosts) > 0:
+            minDistanceToGhost = min([self.getMazeDistance(currPos, ghost) for ghost in ghosts])
+            successorMinDistanceToGhost = min([self.getMazeDistance(successorPos, ghost) for ghost in ghosts])
+            features['minDistanceToGhost'] = minDistanceToGhost / self.maxDistance
+
+            if minDistanceToGhost < 5 and successorMinDistanceToGhost < minDistanceToGhost:
+                features['movesTowardsGhost'] = 1
+
+        features['returnsFood'] = 0
+        if gameState.getAgentState(self.index).isPacman:
+          features[f'currPos{str(self.flipPos(currPos) if not self.red else currPos)}'] = 1
+
+        minDistanceToFood = min([self.getMazeDistance(currPos, food) for food in foodList]) 
+        if numCarrying > 0 and not features['movesTowardsGhost'] == 1 and len(ghosts) > 0:
+            features['returnsFood'] = 1 if successorStartDist < currStartDist else 0
+        
+        if minDistanceToFood == 1 and (len(ghosts) == 0 or minDistanceToGhost > 3):
+            features['returnsFood'] = 0
+
+        elif len(foodList) > 2 and not features['movesTowardsGhost'] == 1:
+          remainingPellets = len(foodList)
+          self.ghostAvoidanceDistance = max(1, 10 - (20 - remainingPellets) * 9 / 18)
+          
+          foodListCopy = foodList.copy()
+          if len(ghosts) > 0:
+            foodList = [food for food in foodList if min([self.getMazeDistance(food, ghost) for ghost in ghosts]) > self.ghostAvoidanceDistance]
+          if len(foodList) == 0:
+            foodList = foodListCopy
+          
+          minDistanceToFood = min([self.getMazeDistance(currPos, food) for food in foodList]) 
+          closestFood = min(foodList, key=lambda food: self.getMazeDistance(currPos, food))
+          successorMinDistanceToFood = min([self.getMazeDistance(successorPos, food) for food in foodList])
+
+          features[f'movesTowardsFood{str(closestFood)}'] = 1
+
+          if successorMinDistanceToFood < minDistanceToFood:
+              features['movesCloserToFood'] = 1
+          
+          features['minDistanceToFood'] = minDistanceToFood / self.maxDistance
+
         if action == Directions.STOP:
-            features['stop'] = 1
-        else:
-            features['stop'] = 0
+            features['stops'] = 1
 
-        # Should return home sensitive features
-        features['headedHome'] = 1 if successorHomeDist < homeDist else 0
+        # print("Current Position", currPos)
+        # print("Action", action)
+        # print(features)
+        # print("=====================================")
+
 
         return features
-
-    def flipDirection(self, direction):
-        if direction == 'North':
-            return 'South'
-        if direction == 'South':
-            return 'North'
-        if direction == 'East':
-            return 'West'
-        if direction == 'West':
-            return 'East' 
 
     def getReward(self, state, action, nextState):
         """
@@ -374,88 +473,38 @@ class PelletChaserAgent(QLearningAgent):
 
         reward = 0
 
-        # If minDistance to food is less than previous state, reward
-        foodList = self.getFood(state).asList()
-        nextFoodList = self.getFood(nextState).asList()
-
-        if pos == nextPos:
-            reward -= 0.3
-        if pos == self.start:
-            reward -= 0.7
-
-        enemies = self.getNearbyEnemies(state)
-        nextEnemies = self.getNearbyEnemies(nextState)
-
-        if features['enteringDeadEnd'] == 1:
-            reward -= 0.95
-
-        if len(nextEnemies) > len(enemies):
-            reward -= 0.4
-        elif len(enemies) > 0 and len(nextEnemies) > 0:
-            minGhostDist = min([self.getMazeDistance(pos, ghost.getPosition()) for ghost in nextEnemies])
-            nextMinGhostDist = min([self.getMazeDistance(nextPos, ghost.getPosition()) for ghost in nextEnemies])
-            if nextMinGhostDist < minGhostDist:
-                reward -= 0.6
-
-        # Check if pacman moves closer to the nearest food
-        if len(nextFoodList) > 0 and len(foodList) > 0:
-            minFoodDist = min([self.getMazeDistance(pos, food) for food in foodList])
-            nextMinFoodDist = min([self.getMazeDistance(nextPos, food) for food in nextFoodList])
-            if nextMinFoodDist < minFoodDist:
-                reward += 0.4
-            else:
-                reward -= 0.4
-
-        if abs(self.getScore(nextState)) > abs(self.getScore(state)):
-            if self.index == 0 and DEBUG:
-                print("Score increased")
+        if features['eatsFood'] == 1:
             reward += 1
-
-        if len(nextFoodList) < len(foodList):
-            if self.index == 0 and DEBUG:
-                print("Eating food")
+        if features['movesCloserToFood'] == 1:
+            reward += 0.1
+        if features['returnsFood'] == 1:
+            reward += 2
+        if features['movesCloserToGhost'] == 1:
+            reward -= 0.5
+        if features['eatsCapsule'] == 1:
             reward += 0.5
 
-        homeDist = self.getMazeDistance(pos, self.start)
-        nextHomeDist = self.getMazeDistance(nextPos, self.start)
-
-        numCarrying = state.getAgentState(self.index).numCarrying
-        if numCarrying > 2:
-            if homeDist > nextHomeDist:
-                reward += 0.5
-
-        # Pacman dies
-        distanceFromStart = self.getMazeDistance(pos, self.start)
-        if nextPos == self.start and distanceFromStart > 5:
-            if self.index == 0 and DEBUG:
-                print("Pacman died")
+        if nextPos == pos:
             reward -= 1
 
-        if features['headedHome'] == 1 and features['movingTowardsFood'] == 0:
-            if numCarrying == 0:
-                reward = 0
-            else:
-                # Modify the reward based on the number of pellets the agent is holding
-                reward_factor = numCarrying / 10  # Adjust the factor as needed
-                reward += 1 * reward_factor
+        # If PacMan dies
+        if nextPos == self.start and state.getAgentState(self.index).numCarrying > 0:
+            reward -= 0.6
 
-        return reward
-    
-        # if not myState.isPacman:
-        #     reward -= 10
+        return reward 
 
-        # Get distance from current position to start position
-        # distanceFromStart = self.getMazeDistance(pos, self.start)
-        # nextDistanceFromStart = self.getMazeDistance(nextPos, self.start)
+    def flipPos(self, pos):
+        return (31 - pos[0], 15 - pos[1])
 
-        # myState = nextState.getAgentState(self.index)
-
-    def getNearbyEnemies(self, state):
-        enemies = [state.getAgentState(i)
-                   for i in self.getOpponents(state)]
-        ghosts = [a for a in enemies if not a.isPacman and not a.scaredTimer > 0 and a.getPosition()]
-        return ghosts
-  
+    def flipDirection(self, direction):
+        if direction == 'North':
+            return 'South'
+        if direction == 'South':
+            return 'North'
+        if direction == 'East':
+            return 'West'
+        if direction == 'West':
+            return 'East' 
 
 class DefensiveAgent(QLearningAgent):
     """
@@ -464,86 +513,73 @@ class DefensiveAgent(QLearningAgent):
     could be like.  It is not the best or only way to make
     such an agent.
     """
-    def __init__(self, index):
-        super().__init__(index)
-        self.recentlyVisitedFood = []
+    def registerInitialState(self, gameState):
+        super().registerInitialState(gameState)
+
+        self.start = gameState.getAgentPosition(self.index)
+        self.centerPellet = (14,9) if self.red else (17,6)
+        self.sections = [1, 5, 10, 14] if self.red else [14, 10, 5, 1]
+        self.entryPoints = [(11,2), (12,6), (12, 13)] if self.red else [(20, 13), (19, 9), (19, 2)]
 
     def getFeatures(self, gameState, action):
         features = util.Counter()
         successor = self.getSuccessor(gameState, action)
 
+        invaderPositions = [pos for (pos, state) in self.ghost_estimates if state.isPacman]
+
+        # print(invaderPositions)
+
         currPos = gameState.getAgentPosition(self.index)
         successorPos = successor.getAgentPosition(self.index)
         successorState = successor.getAgentState(self.index)
 
-        # Computes whether we're on defense (1) or offense (0)
+        isScared = gameState.getAgentState(self.index).scaredTimer > 0
+
+        if len(invaderPositions) > 0:
+            # Get closest invader's position
+            closestInvaderPos = min(invaderPositions, key=lambda x: self.getMazeDistance(currPos, x))
+
+            currentDistToInvader = self.getMazeDistance(currPos, closestInvaderPos)
+            if currentDistToInvader <= 3:
+              successorDistToInvader = self.getMazeDistance(successorPos, closestInvaderPos)
+
+              if successorDistToInvader < currentDistToInvader:
+                  features['movingTowardsInvader'] = 1
+              elif isScared:
+                  features['movingTowardsInvader'] = 1
+            elif not isScared:
+              y_cord = closestInvaderPos[1]
+              section = 0
+              for i in range(len(self.sections)):
+                  if self.red:
+                    if y_cord >= self.sections[i] and y_cord <= self.sections[i+1]:
+                      section = i
+                      break
+                  else:
+                    if y_cord <= self.sections[i] and y_cord >= self.sections[i+1]:
+                      section = i
+                      break
+              entryPoint = self.entryPoints[section]
+              distToEntryPoint = self.getMazeDistance(currPos, entryPoint)
+              successorDistToEntryPoint = self.getMazeDistance(successorPos, entryPoint)
+              if successorDistToEntryPoint < distToEntryPoint:
+                  features['movingToEntryPoint'] = 1
+        elif not isScared:
+          teamFoodList = self.getFoodYouAreDefending(gameState).asList()
+
+          # Move to center pellet
+          features['closerToFood'] = 0
+          if self.centerPellet in teamFoodList:
+              shiftedOne = (self.centerPellet[0], self.centerPellet[1] + (-1 if self.red else 1))
+              distance = self.getMazeDistance(currPos, shiftedOne)
+              nextDistance = self.getMazeDistance(successorPos, shiftedOne)
+              if nextDistance < distance:
+                  features['closerToFood'] = 1
+
+        # On defense or offense
         features['onDefense'] = 1
         if successorState.isPacman:
             features['onDefense'] = 0
-
-        # Computes distance to invaders we can see
-        currentEnemies = [gameState.getAgentState(i)
-                    for i in self.getOpponents(gameState)]
-        currentInvaders = [a for a in currentEnemies if a.isPacman and a.getPosition()]
-
-        successorEnemies = [successor.getAgentState(i)
-                   for i in self.getOpponents(successor)]
-        successorInvaders = [a for a in successorEnemies if a.isPacman and a.getPosition()
-                    != None]
-        
-        features['invadersExist'] = 1 if len(successorInvaders) > 0 else 0
-        
-        features['closerToInvaders'] = 0
-        if len(successorInvaders) > 0 and len(currentInvaders) > 0:
-            dists = min([self.getMazeDistance(
-                currPos, a.getPosition()) for a in currentInvaders])
-            successorDists = min([self.getMazeDistance(
-                successorPos, a.getPosition()) for a in currentInvaders])
-
-            if successorDists < dists:
-                features['closerToInvaders'] = 1
-
-        if action == Directions.STOP:
-            features['stop'] = 1
-        else:
-            features['stop'] = 0
-        
-        # rev = Directions.REVERSE[gameState.getAgentState(
-        #     self.index).configuration.direction]
-        # if action == rev:
-        #     features['reverse'] = 1
-        # else:
-        #     features['reverse'] = 0
-
-        teamFoodList = self.getFoodYouAreDefending(gameState).asList()
-
-        # Intersection to remove food from visited that other pacman might have eaten
-        self.recentlyVisitedFood = list(set(self.recentlyVisitedFood)&set(teamFoodList))
-
-        # print("Recently visited food:", self.recentlyVisitedFood)
-        # print("Team food list:", teamFoodList)
-        # print("My position:", currPos)
-
-        # print("Invaders:", successorInvaders)
-
-        if currPos in teamFoodList:
-            self.recentlyVisitedFood.append(currPos)
-
-        if len(teamFoodList) == len(self.recentlyVisitedFood):
-            self.recentlyVisitedFood = [currPos]
-
-        teamFoodList = list(set(teamFoodList)-set(self.recentlyVisitedFood))
-
-        features['closerToFood'] = 0
-        if len(teamFoodList) > 0 and len(successorInvaders) == 0:
-            minFoodDist = min([self.getMazeDistance(currPos, food) for food in teamFoodList])
-            successorMinFoodDist = min([self.getMazeDistance(successorPos, food) for food in teamFoodList])
-
-            distance = minFoodDist
-            nextDistance = successorMinFoodDist
-
-            if nextDistance < distance:
-                features['closerToFood'] = 1
            
         return features
 
@@ -559,32 +595,25 @@ class DefensiveAgent(QLearningAgent):
         if state is None:
             return 0
       
-        reward = -0.01
-
-        currentEnemies = [state.getAgentState(i)
-                    for i in self.getOpponents(state)]
-        currentInvaders = [a for a in currentEnemies if a.isPacman and a.getPosition()]
+        reward = 0
 
         nextEnemies = [nextState.getAgentState(i)
                     for i in self.getOpponents(nextState)]
         nextInvaders = [a for a in nextEnemies if a.isPacman and a.getPosition()]
 
-        if len(nextInvaders) == 0 and features['closerToFood'] == 1:
-            reward += 0.5
+        if features['movingTowardsInvader'] == 1:
+           reward += 0.2
+
+        if features['movingToEntryPoint'] == 1:
+            reward += 0.2
+
+        if features['closerToFood'] == 1:
+            reward += 0.2
 
         nextAgentState = nextState.getAgentState(self.index)
 
         if nextAgentState.isPacman:
             reward -= 5
-
-        if pos == nextPos:
-            reward -= 0.7
-        
-        if len(currentInvaders) > 0 and len(nextInvaders) > 0:
-          minDistanceToInvader = min([self.getMazeDistance(pos, a.getPosition()) for a in currentInvaders])
-          nextMinDistanceToInvader = min([self.getMazeDistance(nextPos, a.getPosition()) for a in nextInvaders])
-          if nextMinDistanceToInvader < minDistanceToInvader:
-              reward += 0.7
 
         if nextPos == self.start:
             reward -= 0.8
