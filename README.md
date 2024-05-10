@@ -1,6 +1,6 @@
 # CMSI 4320 - Final Project
 
-🤖 Reinforcement learning agents to play Pacman CTF
+🤖 Reinforcement learning agents to play Pacman capture the flag
 
 🏆 Winner of 2024 CMSI 4320 Final Tournament
 
