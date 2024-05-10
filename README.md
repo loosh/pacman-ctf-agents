@@ -36,9 +36,11 @@ We split the roles between our 2 agents, with one defensive and one offensive ag
 
 - Reinforcement Learning
   - Utilized Q-learning to update agent's policies
+    
 - State Approximation
   - Featurized the gamestate using mainly binary features (e.g. 1 for moving towards food)
   - Featurized eating each pellet so the agent could learn which pellets are safe / risky to eat
+    
 - Noisy Distance Decoding
   - If an enemy is more than 5 tiles away, you will receive a noisy distance reading
   - Implemented a particle filter to decode this noisy reading, which allowed our defensive agent to thrive
