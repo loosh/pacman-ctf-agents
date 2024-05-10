@@ -29,7 +29,6 @@ import sys
 from game import Directions
 import game
 from util import nearestPoint
-#import keyboard
 
 
 #################
@@ -141,25 +140,6 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
     we give you to get an idea of what an offensive agent might look like,
     but it is by no means the best or only way to build an offensive agent.
     """
-
-    # def chooseAction(self, gameState):
-    #     actions = gameState.getLegalActions(self.index)
-
-    #     # Map WASD keys to actions
-    #     key_map = {
-    #         'up': 'North',
-    #         'left': 'West',
-    #         'down': 'South',
-    #         'right': 'East'
-    #     }
-
-    #     # Wait for a key press
-    #     while True:
-    #         key_press = keyboard.read_key()
-    #         print(key_press)
-    #         if key_press in key_map and key_map[key_press] in actions:
-    #             return key_map[key_press]
-    #         time.sleep(0.1)  # wait for 0.1 seconds before checking again
 
     def getFeatures(self, gameState, action):
         
