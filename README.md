@@ -8,6 +8,8 @@
 
 The game is a 2v2 capture the flag variant of Pacman, where each team is in control of 2 agents and must return food from the opposing teams side and defend their own food from being taken. When on your teams side, your agent is a ghost and can eat Pacman. If your agent crosses to the other team's side, it becomes a Pacman, and can be eaten by the other teams ghosts. The game ends when 18 pellets are returned or when the specified number of moves are used up.
 
+- All game material is credit to [Berkeley AI](http://ai.berkeley.edu/). We only edited `myTeam_ghostbusters.py`
+
 <img width="750" alt="pactf" src="https://github.com/loosh/pacman-ctf-agents/assets/56782878/4ac69071-74f3-4f4f-b996-f6ba93838789">
 
 ## Tournament Rules
@@ -44,3 +46,25 @@ We split the roles between our 2 agents, with one defensive and one offensive ag
 ## Results
 
 Our agents were extremely effective against other agents and ended up winning the tournament. For fun we also faced off against the previous champions from the last 2 years and our agents were also able to beat them (granted we only played 1 game against each).
+
+## How To Run
+
+1. Clone this repository
+
+2. Run capture.py with the specified teams
+
+```
+python capture.py -r myTeam_ghostbusters -b betterBaselineTeam
+```
+
+3. For more commands, run
+
+```
+python capture.py --help
+```
+
+### References
+
+- Huge credit to [Dr. Forney](https://forns.lmu.build/)
+- Again [Berkeley AI](http://ai.berkeley.edu/home.html)
+
